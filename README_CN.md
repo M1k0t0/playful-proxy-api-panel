@@ -2,6 +2,8 @@
 
 > [!NOTE]
 > 这是 [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) 的社区二开版本，维护名为 **Playful Proxy API Panel (PPAP)**。项目尽量保持上游兼容行为和 README 结构不变；主要改动是恢复内置使用量统计，并在现有管理 API 和 TUI 中增加缓存命中率、首字响应时间、TPS 等聚合指标。需要这些二开统计功能时，请从本仓库 Releases 手动下载安装，不要使用上游包渠道。
+>
+> 面板前端也已开源在本仓库，源码入口是 [`web/management-panel`](https://github.com/daishuge/playful-proxy-api-panel/tree/main/web/management-panel)。
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
@@ -27,6 +29,7 @@
 - 支持 Claude Code 多账户轮询
 - 支持 OpenAI Codex 多账户轮询
 - 通过配置接入上游 OpenAI 兼容提供商（例如 OpenRouter）
+- 面板前端源码已开源并随本仓库一起维护：[`web/management-panel`](https://github.com/daishuge/playful-proxy-api-panel/tree/main/web/management-panel)
 - 可复用的 Go SDK（见 `docs/sdk-usage_CN.md`）
 
 ## 新手入门

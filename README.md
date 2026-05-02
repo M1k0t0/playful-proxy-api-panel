@@ -4,6 +4,8 @@
 > This is a community fork of [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI), maintained as **Playful Proxy API Panel (PPAP)**. It keeps the upstream-compatible behavior and README structure, while restoring built-in usage statistics and adding cache hit rate, first-byte latency, TPS, and related aggregate metrics to the existing management API and TUI surfaces.
 >
 > Install this fork manually from this repository's Releases. Do not use the upstream package channel when you want these fork-specific statistics.
+>
+> The management panel frontend source is open in this repository under [`web/management-panel`](https://github.com/daishuge/playful-proxy-api-panel/tree/main/web/management-panel).
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
@@ -30,6 +32,7 @@ So you can use local or multi-account CLI access with OpenAI(include Responses)/
 - Claude Code multi-account load balancing
 - OpenAI Codex multi-account load balancing
 - OpenAI-compatible upstream providers via config (e.g., OpenRouter)
+- Open management panel frontend source maintained in this repository: [`web/management-panel`](https://github.com/daishuge/playful-proxy-api-panel/tree/main/web/management-panel)
 - Reusable Go SDK for embedding the proxy (see `docs/sdk-usage.md`)
 
 ## Getting Started
