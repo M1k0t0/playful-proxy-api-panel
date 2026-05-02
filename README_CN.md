@@ -1,7 +1,7 @@
-# CLI 代理 API
+# Playful Proxy API Panel (PPAP)
 
 > [!NOTE]
-> 这是 [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) 的社区二开版本，尽量保持上游行为和 README 结构不变；主要改动是恢复内置使用量统计，并在现有管理 API 和 TUI 中增加缓存命中率、首字响应时间、TPS 等聚合指标。需要这些二开统计功能时，请从本仓库 Releases 手动下载安装，不要使用上游包渠道。
+> 这是 [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) 的社区二开版本，维护名为 **Playful Proxy API Panel (PPAP)**。项目尽量保持上游兼容行为和 README 结构不变；主要改动是恢复内置使用量统计，并在现有管理 API 和 TUI 中增加缓存命中率、首字响应时间、TPS 等聚合指标。需要这些二开统计功能时，请从本仓库 Releases 手动下载安装，不要使用上游包渠道。
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
@@ -38,8 +38,8 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 本 fork 默认不发布单独的公开 Docker 镜像。建议直接从本仓库源码本地构建镜像，这样容器里一定包含本 fork 的使用量统计改动。
 
 ```bash
-git clone https://github.com/daishuge/CLIProxyAPI.git
-cd CLIProxyAPI
+git clone https://github.com/daishuge/playful-proxy-api-panel.git
+cd playful-proxy-api-panel
 cp config.example.yaml config.yaml
 mkdir -p auths logs
 docker compose up -d --build
@@ -62,6 +62,12 @@ docker compose up -d --build
 本二开版本恢复了内置 `/v0/management/usage`、`/v0/management/usage/export` 和 `/v0/management/usage/import` 接口。使用量快照会记录缓存命中率、首字响应时间、平均耗时、TPS、Token 细分，以及按 API / model 汇总的明细；具体字段取决于上游提供商返回的 usage 数据。
 
 现有 TUI 使用量页面会用原来的卡片和表格风格展示这些指标。如果需要独立持久化或专门的仪表盘，仍可搭配 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用。
+
+## 管理面板源码
+
+管理面板前端现在和后端维护在同一个仓库中，源码位于 [`web/management-panel`](web/management-panel)。每次 release 会从同一个 tag 发布后端二进制和单文件 `management.html`，因此后端的面板自动更新地址可以直接指向本仓库。
+
+旧的 `daishuge/CLIProxyAPI` 仓库名在 GitHub 改名后会继续跳转到这里；独立面板仓库也会保留一段时间，方便用户过渡，但新的改动都以本仓库为准。
 
 ## Amp CLI 支持
 

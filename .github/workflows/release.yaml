@@ -25,6 +25,17 @@ jobs:
         with:
           go-version: '>=1.26.0'
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/management-panel/package-lock.json
+      - name: Build management panel
+        working-directory: web/management-panel
+        run: |
+          npm ci
+          npm run build
+          cp dist/index.html dist/management.html
       - name: Generate Build Metadata
         run: |
           echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV

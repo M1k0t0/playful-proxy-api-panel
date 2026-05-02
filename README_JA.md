@@ -1,7 +1,7 @@
-# CLI Proxy API
+# Playful Proxy API Panel (PPAP)
 
 > [!NOTE]
-> This is a community fork of [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI). It keeps upstream behavior and README structure as much as possible, while restoring built-in usage statistics and adding cache hit rate, first-byte latency, TPS, and related aggregate metrics to the existing management API and TUI. Install this fork manually from this repository's Releases when you need these fork-specific metrics.
+> This is a community fork of [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI), maintained as **Playful Proxy API Panel (PPAP)**. It keeps upstream-compatible behavior and README structure as much as possible, while restoring built-in usage statistics and adding cache hit rate, first-byte latency, TPS, and related aggregate metrics to the existing management API and TUI. Install this fork manually from this repository's Releases when you need these fork-specific metrics.
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
@@ -39,8 +39,8 @@ CLIProxyAPIガイド：[https://help.router-for.me/](https://help.router-for.me/
 This fork does not publish a separate public Docker image by default. Build it locally from this repository so the container includes the fork-specific usage statistics changes.
 
 ```bash
-git clone https://github.com/daishuge/CLIProxyAPI.git
-cd CLIProxyAPI
+git clone https://github.com/daishuge/playful-proxy-api-panel.git
+cd playful-proxy-api-panel
 cp config.example.yaml config.yaml
 mkdir -p auths logs
 docker compose up -d --build
@@ -57,6 +57,12 @@ The default compose file builds `cliproxyapi-fork:local` from the local `Dockerf
 This fork restores the built-in `/v0/management/usage`, `/v0/management/usage/export`, and `/v0/management/usage/import` endpoints. The usage snapshot records cache hit rate, first-byte latency, average latency, TPS, token breakdowns, and per-API/per-model details when the upstream provider returns enough usage data.
 
 The existing TUI usage tab displays these metrics with the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when separate persistence or a dedicated dashboard is needed.
+
+## Management Panel Source
+
+The management panel frontend now lives in this repository under [`web/management-panel`](web/management-panel). Releases publish backend binaries and the single-file `management.html` from the same tag, so the backend panel auto-updater can point directly at this repository.
+
+The previous `daishuge/CLIProxyAPI` repository name is kept as a GitHub redirect after the rename. The standalone panel repository remains available during the transition, but new changes land here.
 
 ## Amp CLIサポート
 

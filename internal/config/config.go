@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	DefaultPanelGitHubRepository = "https://github.com/daishuge/Cli-Proxy-API-Management-Center"
+	DefaultPanelGitHubRepository = "https://github.com/daishuge/playful-proxy-api-panel"
 	DefaultPprofAddr             = "127.0.0.1:8316"
 )
 

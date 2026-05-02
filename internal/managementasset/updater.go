@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	defaultManagementReleaseURL  = "https://api.github.com/repos/daishuge/Cli-Proxy-API-Management-Center/releases/latest"
-	defaultManagementFallbackURL = "https://github.com/daishuge/Cli-Proxy-API-Management-Center/releases/latest/download/management.html"
+	defaultManagementReleaseURL  = "https://api.github.com/repos/daishuge/playful-proxy-api-panel/releases/latest"
+	defaultManagementFallbackURL = "https://github.com/daishuge/playful-proxy-api-panel/releases/latest/download/management.html"
 	managementAssetName          = "management.html"
 	httpUserAgent                = "CLIProxyAPI-management-updater"
 	managementSyncMinInterval    = 30 * time.Second
