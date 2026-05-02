@@ -1,0 +1,262 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+}
+
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $spacing-md;
+
+  @include mobile {
+    flex-direction: column;
+  }
+}
+
+.pageTitle {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.description {
+  margin: $spacing-xs 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+
+  :global(.btn > span) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  @include mobile {
+    width: 100%;
+    justify-content: stretch;
+
+    :global(.btn) {
+      flex: 1 1 auto;
+      justify-content: center;
+    }
+  }
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.errorBox {
+  padding: $spacing-md;
+  border: 1px solid var(--danger-color);
+  border-radius: $radius-md;
+  color: var(--danger-color);
+  background-color: rgba($error-color, 0.1);
+  font-size: 14px;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: $spacing-md;
+}
+
+.metricTile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 104px;
+  padding: $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+}
+
+.metricLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metricValue {
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.metricSub {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.emptyState,
+.emptyInline,
+.emptyCell {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.emptyState {
+  padding: $spacing-lg;
+  border: 1px dashed var(--border-color);
+  border-radius: $radius-md;
+  text-align: center;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.sectionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-lg;
+
+  @include mobile {
+    grid-template-columns: 1fr;
+  }
+}
+
+.timelineList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.timelineRow {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.7fr) minmax(120px, 2fr) minmax(96px, auto);
+  align-items: center;
+  gap: $spacing-sm;
+  min-height: 28px;
+
+  @include mobile {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+.timelineLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.timelineTrack {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+}
+
+.timelineBar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--primary-color);
+}
+
+.timelineValue {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+
+  @include mobile {
+    text-align: left;
+  }
+}
+
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th,
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  th {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  }
+
+  td {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--bg-hover) 74%, transparent);
+  }
+}
+
+.monoCell {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+}
+
+.mutedCell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary) !important;
+}
+
+.emptyCell {
+  padding: $spacing-lg !important;
+  text-align: center !important;
+}
+
+.statusOk,
+.statusFailed {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statusOk {
+  color: var(--success-color);
+  background: rgba($success-color, 0.1);
+}
+
+.statusFailed {
+  color: var(--danger-color);
+  background: rgba($error-color, 0.1);
+}
