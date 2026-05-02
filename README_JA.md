@@ -56,7 +56,7 @@ The default compose file builds `cliproxyapi-fork:local` from the local `Dockerf
 
 This fork restores the built-in `/v0/management/usage`, `/v0/management/usage/export`, and `/v0/management/usage/import` endpoints. The usage snapshot records cache hit rate, first-byte latency, average latency, TPS, token breakdowns, and per-API/per-model details when the upstream provider returns enough usage data.
 
-The existing TUI usage tab displays these metrics with the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when separate persistence or a dedicated dashboard is needed.
+When `usage-statistics-enabled` is true, PPAP automatically persists the usage snapshot to `usage-statistics.json` next to `config.yaml` unless `usage-statistics-path` is set. The existing TUI usage tab displays these metrics with the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when a separate dashboard is needed.
 
 ## Management Panel Source
 

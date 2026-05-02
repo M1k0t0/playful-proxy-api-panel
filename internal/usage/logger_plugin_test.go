@@ -2,6 +2,8 @@ package usage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -112,5 +114,77 @@ func TestRequestStatisticsMergeSnapshotDedupIgnoresLatency(t *testing.T) {
 	details := snapshot.APIs["test-key"].Models["gpt-5.4"].Details
 	if len(details) != 1 {
 		t.Fatalf("details len = %d, want 1", len(details))
+	}
+}
+
+func TestUsageStatisticsPersistenceRoundTrip(t *testing.T) {
+	stats := NewRequestStatistics()
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:           "persist-key",
+		Model:            "gpt-5.5",
+		RequestedAt:      time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC),
+		Latency:          1800 * time.Millisecond,
+		FirstByteLatency: 300 * time.Millisecond,
+		Detail: coreusage.Detail{
+			InputTokens:  12,
+			OutputTokens: 18,
+			CachedTokens: 6,
+			TotalTokens:  30,
+		},
+	})
+
+	path := filepath.Join(t.TempDir(), "usage-statistics.json")
+	if err := SaveStatisticsFile(path, stats.Snapshot()); err != nil {
+		t.Fatalf("SaveStatisticsFile() error = %v", err)
+	}
+
+	restored := NewRequestStatistics()
+	result, err := LoadStatisticsFile(restored, path)
+	if err != nil {
+		t.Fatalf("LoadStatisticsFile() error = %v", err)
+	}
+	if result.Added != 1 || result.Skipped != 0 {
+		t.Fatalf("LoadStatisticsFile() result = %+v, want added=1 skipped=0", result)
+	}
+
+	snapshot := restored.Snapshot()
+	if snapshot.TotalRequests != 1 || snapshot.TotalTokens != 30 || snapshot.TotalCachedTokens != 6 {
+		t.Fatalf("snapshot totals = requests %d tokens %d cached %d", snapshot.TotalRequests, snapshot.TotalTokens, snapshot.TotalCachedTokens)
+	}
+	detail := snapshot.APIs["persist-key"].Models["gpt-5.5"].Details[0]
+	if detail.FirstByteLatencyMs != 300 || detail.LatencyMs != 1800 {
+		t.Fatalf("detail latency = %d first byte = %d", detail.LatencyMs, detail.FirstByteLatencyMs)
+	}
+}
+
+func TestUsageStatisticsPersistenceFlushesOnStop(t *testing.T) {
+	stats := NewRequestStatistics()
+	path := filepath.Join(t.TempDir(), "usage-statistics.json")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := StartPersistence(ctx, stats, path, time.Hour)
+	stats.Record(context.Background(), coreusage.Record{
+		APIKey:      "stop-key",
+		Model:       "gpt-5.5",
+		RequestedAt: time.Date(2026, 5, 2, 13, 0, 0, 0, time.UTC),
+		Detail: coreusage.Detail{
+			InputTokens: 1,
+			TotalTokens: 1,
+		},
+	})
+	cancel()
+	stop()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("persisted file stat error = %v", err)
+	}
+
+	restored := NewRequestStatistics()
+	result, err := LoadStatisticsFile(restored, path)
+	if err != nil {
+		t.Fatalf("LoadStatisticsFile() error = %v", err)
+	}
+	if result.Added != 1 {
+		t.Fatalf("LoadStatisticsFile() added = %d, want 1", result.Added)
 	}
 }

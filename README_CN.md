@@ -64,7 +64,7 @@ docker compose up -d --build
 
 本二开版本恢复了内置 `/v0/management/usage`、`/v0/management/usage/export` 和 `/v0/management/usage/import` 接口。使用量快照会记录缓存命中率、首字响应时间、平均耗时、TPS、Token 细分，以及按 API / model 汇总的明细；具体字段取决于上游提供商返回的 usage 数据。
 
-现有 TUI 使用量页面会用原来的卡片和表格风格展示这些指标。如果需要独立持久化或专门的仪表盘，仍可搭配 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用。
+当 `usage-statistics-enabled` 为 true 时，PPAP 会自动把统计快照持久化到 `config.yaml` 同目录的 `usage-statistics.json`，也可以通过 `usage-statistics-path` 指定路径。现有 TUI 使用量页面会用原来的卡片和表格风格展示这些指标；如果需要专门的外部仪表盘，仍可搭配 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用。
 
 ## 管理面板源码
 

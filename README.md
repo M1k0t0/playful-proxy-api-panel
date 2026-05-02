@@ -86,7 +86,7 @@ see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
 
 This fork restores the built-in `/v0/management/usage`, `/v0/management/usage/export`, and `/v0/management/usage/import` endpoints. The usage snapshot also records cache hit rate, first-byte latency, average latency, TPS, token breakdowns, and per-API/per-model details where the upstream provider returns enough usage data.
 
-The existing TUI usage tab displays these metrics in the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when you need separate persistence or a dedicated dashboard.
+When `usage-statistics-enabled` is true, PPAP automatically persists the usage snapshot to `usage-statistics.json` next to `config.yaml` unless `usage-statistics-path` is set. The existing TUI usage tab displays these metrics in the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when you need a separate dashboard.
 
 ## Management Panel Source
 
