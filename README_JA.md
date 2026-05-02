@@ -1,5 +1,8 @@
 # CLI Proxy API
 
+> [!NOTE]
+> This is a community fork of [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI). It keeps upstream behavior and README structure as much as possible, while restoring built-in usage statistics and adding cache hit rate, first-byte latency, TPS, and related aggregate metrics to the existing management API and TUI. Install this fork manually from this repository's Releases when you need these fork-specific metrics.
+
 [English](README.md) | [中文](README_CN.md) | 日本語
 
 CLI向けのOpenAI/Gemini/Claude/Codex互換APIインターフェースを提供するプロキシサーバーです。
@@ -71,6 +74,12 @@ CLIProxyAPIガイド：[https://help.router-for.me/](https://help.router-for.me/
 ## 管理API
 
 [MANAGEMENT_API.md](https://help.router-for.me/management/api)を参照
+
+## 使用量統計
+
+This fork restores the built-in `/v0/management/usage`, `/v0/management/usage/export`, and `/v0/management/usage/import` endpoints. The usage snapshot records cache hit rate, first-byte latency, average latency, TPS, token breakdowns, and per-API/per-model details when the upstream provider returns enough usage data.
+
+The existing TUI usage tab displays these metrics with the same card and table style as the original interface. External tools such as [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) can still be used when separate persistence or a dedicated dashboard is needed.
 
 ## Amp CLIサポート
 
@@ -177,10 +186,6 @@ CLIProxyAPIをネイティブGUIでラップしたクロスプラットフォー
 ### [CLIProxyAPI Quota Inspector](https://github.com/AllenReder/CLIProxyAPI-Quota-Inspector)
 
 CLIProxyAPI向けのすぐに使えるクロスプラットフォームのクォータ確認ツール。アカウントごとの codex 5h/7d クォータ表示、プラン別ソート、ステータス色分け、複数アカウントの集計分析に対応。
-
-### [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
-
-CLIProxyAPI向けの独立した使用量永続化・可視化サービス。CPAデータを定期同期してSQLiteに保存し、集計APIと、使用量や各種統計を確認できる組み込みダッシュボードを提供します。
 
 ### [CodexCliPlus](https://github.com/C4AL/CodexCliPlus)
 

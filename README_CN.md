@@ -1,5 +1,8 @@
 # CLI 代理 API
 
+> [!NOTE]
+> 这是 [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) 的社区二开版本，尽量保持上游行为和 README 结构不变；主要改动是恢复内置使用量统计，并在现有管理 API 和 TUI 中增加缓存命中率、首字响应时间、TPS 等聚合指标。需要这些二开统计功能时，请从本仓库 Releases 手动下载安装，不要使用上游包渠道。
+
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
 一个为 CLI 提供 OpenAI/Gemini/Claude/Codex 兼容 API 接口的代理服务器。
@@ -73,6 +76,12 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 ## 管理 API 文档
 
 请参见 [MANAGEMENT_API_CN.md](https://help.router-for.me/cn/management/api)
+
+## 使用量统计
+
+本二开版本恢复了内置 `/v0/management/usage`、`/v0/management/usage/export` 和 `/v0/management/usage/import` 接口。使用量快照会记录缓存命中率、首字响应时间、平均耗时、TPS、Token 细分，以及按 API / model 汇总的明细；具体字段取决于上游提供商返回的 usage 数据。
+
+现有 TUI 使用量页面会用原来的卡片和表格风格展示这些指标。如果需要独立持久化或专门的仪表盘，仍可搭配 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 使用。
 
 ## Amp CLI 支持
 
@@ -178,10 +187,6 @@ Shadow AI 是一款专为受限环境设计的 AI 辅助工具。提供无窗口
 ### [CLIProxyAPI Quota Inspector](https://github.com/AllenReder/CLIProxyAPI-Quota-Inspector)
 
 上手即用的面向 CLIProxyAPI 跨平台配额查询工具，支持按账号展示 codex 5h/7d 配额窗口、按计划排序、状态着色及多账号汇总分析。
-
-### [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
-
-独立的 CLIProxyAPI 使用量持久化与可视化服务，定期同步 CPA 数据，存储到 SQLite，提供聚合 API，并内置使用量分析与统计仪表盘。
 
 ### [CodexCliPlus](https://github.com/C4AL/CodexCliPlus)
 

@@ -11,13 +11,15 @@ import (
 func TestRequestStatisticsRecordIncludesLatency(t *testing.T) {
 	stats := NewRequestStatistics()
 	stats.Record(context.Background(), coreusage.Record{
-		APIKey:      "test-key",
-		Model:       "gpt-5.4",
-		RequestedAt: time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC),
-		Latency:     1500 * time.Millisecond,
+		APIKey:           "test-key",
+		Model:            "gpt-5.4",
+		RequestedAt:      time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC),
+		Latency:          1500 * time.Millisecond,
+		FirstByteLatency: 250 * time.Millisecond,
 		Detail: coreusage.Detail{
 			InputTokens:  10,
 			OutputTokens: 20,
+			CachedTokens: 5,
 			TotalTokens:  30,
 		},
 	})
@@ -29,6 +31,24 @@ func TestRequestStatisticsRecordIncludesLatency(t *testing.T) {
 	}
 	if details[0].LatencyMs != 1500 {
 		t.Fatalf("latency_ms = %d, want 1500", details[0].LatencyMs)
+	}
+	if details[0].FirstByteLatencyMs != 250 {
+		t.Fatalf("first_byte_latency_ms = %d, want 250", details[0].FirstByteLatencyMs)
+	}
+	if snapshot.TotalCachedTokens != 5 {
+		t.Fatalf("total_cached_tokens = %d, want 5", snapshot.TotalCachedTokens)
+	}
+	if snapshot.CacheHitRate != 50 {
+		t.Fatalf("cache_hit_rate = %f, want 50", snapshot.CacheHitRate)
+	}
+	if snapshot.AverageLatencyMs != 1500 {
+		t.Fatalf("average_latency_ms = %d, want 1500", snapshot.AverageLatencyMs)
+	}
+	if snapshot.AverageFirstByteLatencyMs != 250 {
+		t.Fatalf("average_first_byte_latency_ms = %d, want 250", snapshot.AverageFirstByteLatencyMs)
+	}
+	if snapshot.TPS != 1 {
+		t.Fatalf("tps = %f, want 1", snapshot.TPS)
 	}
 }
 
