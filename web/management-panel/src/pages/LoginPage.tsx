@@ -197,7 +197,10 @@ export function LoginPage() {
           /* 启动动画 */
           <div className={styles.splashContent}>
             <img src={INLINE_LOGO_JPEG} alt="PPAP" className={styles.splashLogo} />
-            <h1 className={styles.splashTitle}>{t('splash.title')}</h1>
+            <h1 className={styles.splashTitle} aria-label={t('splash.title')}>
+              <span>{t('splash.title_line_1')}</span>
+              <span>{t('splash.title_line_2')}</span>
+            </h1>
             <p className={styles.splashSubtitle}>{t('splash.subtitle')}</p>
             <div className={styles.splashLoader}>
               <div className={styles.splashLoaderBar} />

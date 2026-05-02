@@ -62,8 +62,10 @@
     "abbr": "PPAP"
   },
   "splash": {
-    "title": "PPAP",
-    "subtitle": "Management Panel"
+    "title": "Playful Proxy API Panel",
+    "title_line_1": "Playful Proxy",
+    "title_line_2": "API Panel",
+    "subtitle": "playful-proxy-api-panel"
   },
   "auto_login": {
     "title": "Auto Login in Progress...",

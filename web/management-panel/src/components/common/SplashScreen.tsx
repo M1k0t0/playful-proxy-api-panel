@@ -28,7 +28,10 @@ export function SplashScreen({ onFinish, fadeOut = false }: SplashScreenProps) {
     <div className={`splash-screen ${fadeOut ? 'fade-out' : ''}`}>
       <div className="splash-content">
         <img src={INLINE_LOGO_JPEG} alt="PPAP" className="splash-logo" />
-        <h1 className="splash-title">{t('splash.title')}</h1>
+        <h1 className="splash-title" aria-label={t('splash.title')}>
+          <span>{t('splash.title_line_1')}</span>
+          <span>{t('splash.title_line_2')}</span>
+        </h1>
         <p className="splash-subtitle">{t('splash.subtitle')}</p>
         <div className="splash-loader">
           <div className="splash-loader-bar" />
