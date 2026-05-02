@@ -4,7 +4,7 @@ import '@/styles/global.scss';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
 import App from './App.tsx';
 
-document.title = 'Playful Proxy API Panel';
+document.title = 'daishuge/cpa';
 document.documentElement.setAttribute('translate', 'no');
 document.documentElement.classList.add('notranslate');
 
