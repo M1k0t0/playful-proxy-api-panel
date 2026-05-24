@@ -201,6 +201,7 @@ export function AiProvidersOpenAIEditPage() {
         setDraftKeyTestStatus(keyIndex, { status: 'error', message: t('notification.openai_test_key_required') });
         return false;
       }
+      const authIndex = String(keyEntry.authIndex ?? '').trim();
 
       const modelName = testModel.trim() || availableModels[0] || '';
       if (!modelName) {
@@ -223,6 +224,7 @@ export function AiProvidersOpenAIEditPage() {
       try {
         const result = await apiCallApi.request(
           {
+            authIndex: authIndex || undefined,
             method: 'POST',
             url: endpoint,
             header: Object.keys(headers).length ? headers : undefined,

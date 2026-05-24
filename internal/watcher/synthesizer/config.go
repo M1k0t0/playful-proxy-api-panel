@@ -78,6 +78,7 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeys(ctx *SynthesisContext) []*corea
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
+			Metadata:   metadataWithDisableCooling(entry.DisableCooling),
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
@@ -126,6 +127,7 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
+			Metadata:   metadataWithDisableCooling(ck.DisableCooling),
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
@@ -176,6 +178,7 @@ func (s *ConfigSynthesizer) synthesizeCodexKeys(ctx *SynthesisContext) []*coreau
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
+			Metadata:   metadataWithDisableCooling(ck.DisableCooling),
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
@@ -203,6 +206,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			providerName = "openai-compatibility"
 		}
 		base := strings.TrimSpace(compat.BaseURL)
+		metadata := metadataWithDisableCooling(compat.DisableCooling)
 
 		// Handle new APIKeyEntries format (preferred)
 		createdEntries := 0
@@ -236,6 +240,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				Status:     coreauth.StatusActive,
 				ProxyURL:   proxyURL,
 				Attributes: attrs,
+				Metadata:   cloneMetadata(metadata),
 				CreatedAt:  now,
 				UpdatedAt:  now,
 			}
@@ -266,11 +271,30 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				Prefix:     prefix,
 				Status:     coreauth.StatusActive,
 				Attributes: attrs,
+				Metadata:   cloneMetadata(metadata),
 				CreatedAt:  now,
 				UpdatedAt:  now,
 			}
 			out = append(out, a)
 		}
+	}
+	return out
+}
+
+func metadataWithDisableCooling(disable bool) map[string]any {
+	if !disable {
+		return nil
+	}
+	return map[string]any{"disable_cooling": true}
+}
+
+func cloneMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		out[key] = value
 	}
 	return out
 }

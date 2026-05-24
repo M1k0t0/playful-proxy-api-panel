@@ -140,24 +140,9 @@ func readTestRESPBulkString(r *bufio.Reader) ([]byte, error) {
 }
 
 func readRESPArrayOfBulkStrings(r *bufio.Reader) ([][]byte, error) {
-	prefix, err := r.ReadByte()
+	count, err := readTestRESPArrayHeader(r)
 	if err != nil {
 		return nil, err
-	}
-	if prefix != '*' {
-		return nil, fmt.Errorf("expected array prefix '*', got %q", prefix)
-	}
-
-	line, err := readTestRESPLine(r)
-	if err != nil {
-		return nil, err
-	}
-	count, err := strconv.Atoi(line)
-	if err != nil {
-		return nil, fmt.Errorf("invalid array length %q: %v", line, err)
-	}
-	if count < 0 {
-		return nil, fmt.Errorf("invalid array length %d", count)
 	}
 
 	out := make([][]byte, 0, count)
@@ -169,6 +154,70 @@ func readRESPArrayOfBulkStrings(r *bufio.Reader) ([][]byte, error) {
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+func readTestRESPArrayHeader(r *bufio.Reader) (int, error) {
+	prefix, err := r.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	if prefix != '*' {
+		return 0, fmt.Errorf("expected array prefix '*', got %q", prefix)
+	}
+
+	line, err := readTestRESPLine(r)
+	if err != nil {
+		return 0, err
+	}
+	count, err := strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("invalid array length %q: %v", line, err)
+	}
+	if count < 0 {
+		return 0, fmt.Errorf("invalid array length %d", count)
+	}
+	return count, nil
+}
+
+func readTestRESPInteger(r *bufio.Reader) (int, error) {
+	prefix, err := r.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	if prefix != ':' {
+		return 0, fmt.Errorf("expected integer prefix ':', got %q", prefix)
+	}
+	line, err := readTestRESPLine(r)
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q: %v", line, err)
+	}
+	return value, nil
+}
+
+func readTestRESPBulkStringValue(t *testing.T, r *bufio.Reader, want string) {
+	t.Helper()
+	got, err := readTestRESPBulkString(r)
+	if err != nil {
+		t.Fatalf("failed to read bulk string: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("bulk string = %q, want %q", string(got), want)
+	}
+}
+
+func readTestRESPIntegerValue(t *testing.T, r *bufio.Reader, want int) {
+	t.Helper()
+	got, err := readTestRESPInteger(r)
+	if err != nil {
+		t.Fatalf("failed to read integer: %v", err)
+	}
+	if got != want {
+		t.Fatalf("integer = %d, want %d", got, want)
+	}
 }
 
 func TestRedisProtocol_ManagementDisabled_RejectsConnection(t *testing.T) {
@@ -201,6 +250,46 @@ func TestRedisProtocol_ManagementDisabled_RejectsConnection(t *testing.T) {
 	}
 	if ne, ok := errRead.(net.Error); ok && ne.Timeout() {
 		t.Fatalf("expected connection to be closed when management is disabled, got timeout: %v", errRead)
+	}
+}
+
+func TestRedisProtocol_IdleConnectionDoesNotBlockMuxAcceptLoop(t *testing.T) {
+	const managementPassword = "test-management-password"
+
+	t.Setenv("MANAGEMENT_PASSWORD", managementPassword)
+	redisqueue.SetEnabled(false)
+	t.Cleanup(func() { redisqueue.SetEnabled(false) })
+
+	server := newTestServer(t)
+	if !server.managementRoutesEnabled.Load() {
+		t.Fatalf("expected managementRoutesEnabled to be true")
+	}
+
+	addr, stop := startRedisMuxListener(t, server)
+	t.Cleanup(stop)
+
+	idleConn, errIdle := net.DialTimeout("tcp", addr, time.Second)
+	if errIdle != nil {
+		t.Fatalf("failed to dial idle connection: %v", errIdle)
+	}
+	t.Cleanup(func() { _ = idleConn.Close() })
+
+	conn, errDial := net.DialTimeout("tcp", addr, time.Second)
+	if errDial != nil {
+		t.Fatalf("failed to dial second redis listener connection: %v", errDial)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	reader := bufio.NewReader(conn)
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	if errWrite := writeTestRESPCommand(conn, "AUTH", managementPassword); errWrite != nil {
+		t.Fatalf("failed to write AUTH command on second connection: %v", errWrite)
+	}
+	if msg, err := readTestRESPSimpleString(reader); err != nil {
+		t.Fatalf("failed to read AUTH response on second connection: %v", err)
+	} else if msg != "OK" {
+		t.Fatalf("unexpected AUTH response: %q", msg)
 	}
 }
 
@@ -313,6 +402,86 @@ func TestRedisProtocol_AUTH_And_PopContracts(t *testing.T) {
 	if len(emptyItems) != 0 {
 		t.Fatalf("expected empty array for empty queue with count, got %#v", emptyItems)
 	}
+}
+
+func TestRedisProtocol_SUBSCRIBE_StreamsUsageAndCommands(t *testing.T) {
+	const managementPassword = "test-management-password"
+
+	t.Setenv("MANAGEMENT_PASSWORD", managementPassword)
+	redisqueue.SetEnabled(false)
+	t.Cleanup(func() { redisqueue.SetEnabled(false) })
+
+	server := newTestServer(t)
+	if !server.managementRoutesEnabled.Load() {
+		t.Fatalf("expected managementRoutesEnabled to be true")
+	}
+	redisqueue.SetEnabled(true)
+
+	addr, stop := startRedisMuxListener(t, server)
+	t.Cleanup(stop)
+
+	conn, errDial := net.DialTimeout("tcp", addr, time.Second)
+	if errDial != nil {
+		t.Fatalf("failed to dial redis listener: %v", errDial)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	reader := bufio.NewReader(conn)
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if errWrite := writeTestRESPCommand(conn, "AUTH", managementPassword); errWrite != nil {
+		t.Fatalf("failed to write AUTH command: %v", errWrite)
+	}
+	if msg, err := readTestRESPSimpleString(reader); err != nil {
+		t.Fatalf("failed to read AUTH response: %v", err)
+	} else if msg != "OK" {
+		t.Fatalf("unexpected AUTH response: %q", msg)
+	}
+
+	if errWrite := writeTestRESPCommand(conn, "SUBSCRIBE", "usage"); errWrite != nil {
+		t.Fatalf("failed to write SUBSCRIBE command: %v", errWrite)
+	}
+	if count, err := readTestRESPArrayHeader(reader); err != nil {
+		t.Fatalf("failed to read SUBSCRIBE array: %v", err)
+	} else if count != 3 {
+		t.Fatalf("subscribe array count = %d, want 3", count)
+	}
+	readTestRESPBulkStringValue(t, reader, "subscribe")
+	readTestRESPBulkStringValue(t, reader, "usage")
+	readTestRESPIntegerValue(t, reader, 1)
+
+	redisqueue.Enqueue([]byte("usage-payload"))
+	if count, err := readTestRESPArrayHeader(reader); err != nil {
+		t.Fatalf("failed to read message array: %v", err)
+	} else if count != 3 {
+		t.Fatalf("message array count = %d, want 3", count)
+	}
+	readTestRESPBulkStringValue(t, reader, "message")
+	readTestRESPBulkStringValue(t, reader, "usage")
+	readTestRESPBulkStringValue(t, reader, "usage-payload")
+
+	if errWrite := writeTestRESPCommand(conn, "PING", "probe"); errWrite != nil {
+		t.Fatalf("failed to write PING command: %v", errWrite)
+	}
+	if count, err := readTestRESPArrayHeader(reader); err != nil {
+		t.Fatalf("failed to read pong array: %v", err)
+	} else if count != 2 {
+		t.Fatalf("pong array count = %d, want 2", count)
+	}
+	readTestRESPBulkStringValue(t, reader, "pong")
+	readTestRESPBulkStringValue(t, reader, "probe")
+
+	if errWrite := writeTestRESPCommand(conn, "UNSUBSCRIBE"); errWrite != nil {
+		t.Fatalf("failed to write UNSUBSCRIBE command: %v", errWrite)
+	}
+	if count, err := readTestRESPArrayHeader(reader); err != nil {
+		t.Fatalf("failed to read unsubscribe array: %v", err)
+	} else if count != 3 {
+		t.Fatalf("unsubscribe array count = %d, want 3", count)
+	}
+	readTestRESPBulkStringValue(t, reader, "unsubscribe")
+	readTestRESPBulkStringValue(t, reader, "usage")
+	readTestRESPIntegerValue(t, reader, 0)
 }
 
 func TestRedisProtocol_IPBan_MirrorsManagementPolicy(t *testing.T) {

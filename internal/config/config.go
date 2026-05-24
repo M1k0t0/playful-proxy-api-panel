@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	log "github.com/sirupsen/logrus"
@@ -20,8 +21,14 @@ import (
 )
 
 const (
-	DefaultPanelGitHubRepository = "https://github.com/daishuge/playful-proxy-api-panel"
-	DefaultPprofAddr             = "127.0.0.1:8316"
+	DefaultPanelGitHubRepository     = "https://github.com/daishuge/playful-proxy-api-panel"
+	DefaultPprofAddr                 = "127.0.0.1:8316"
+	DefaultConversationLogDir        = "conversation-logs"
+	DefaultConversationLogFileMB     = 16
+	DefaultConversationLogTotalMB    = 256
+	DefaultConversationLogEntryBytes = 2 * 1024 * 1024
+	DefaultPresetPromptMaxBytes      = 32 * 1024
+	PresetPromptHardMaxBytes         = 256 * 1024
 )
 
 // Config represents the application's configuration, loaded from a YAML file.
@@ -59,7 +66,7 @@ type Config struct {
 	LogsMaxTotalSizeMB int `yaml:"logs-max-total-size-mb" json:"logs-max-total-size-mb"`
 
 	// ErrorLogsMaxFiles limits the number of error log files retained when request logging is disabled.
-	// When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
+	// When exceeded, the oldest error log files are deleted. Default is 0, which disables cleanup.
 	ErrorLogsMaxFiles int `yaml:"error-logs-max-files" json:"error-logs-max-files"`
 
 	// UsageStatisticsEnabled toggles usage aggregation; when false, usage data is discarded.
@@ -70,6 +77,12 @@ type Config struct {
 
 	// UsageStatisticsFlushIntervalSeconds controls how often the usage snapshot is written. Default is 30 seconds.
 	UsageStatisticsFlushIntervalSeconds int `yaml:"usage-statistics-flush-interval-seconds,omitempty" json:"usage-statistics-flush-interval-seconds,omitempty"`
+
+	// ConversationLog controls opt-in full conversation logging storage.
+	ConversationLog ConversationLogConfig `yaml:"conversation-log" json:"conversation-log"`
+
+	// PresetPrompt controls opt-in upstream-only prompt injection.
+	PresetPrompt PresetPromptConfig `yaml:"preset-prompt" json:"preset-prompt"`
 
 	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
 	// are retained in memory for the Redis RESP interface (LPOP/RPOP).
@@ -96,6 +109,10 @@ type Config struct {
 
 	// Routing controls credential selection behavior.
 	Routing RoutingConfig `yaml:"routing" json:"routing"`
+
+	// UpstreamConcurrency limits concurrent upstream requests before they reach providers.
+	// Limits are opt-in; zero means unlimited.
+	UpstreamConcurrency UpstreamConcurrencyConfig `yaml:"upstream-concurrency" json:"upstream-concurrency"`
 
 	// WebsocketAuth enables or disables authentication for the WebSocket API.
 	WebsocketAuth bool `yaml:"ws-auth" json:"ws-auth"`
@@ -148,7 +165,29 @@ type Config struct {
 	// Payload defines default and override rules for provider payload parameters.
 	Payload PayloadConfig `yaml:"payload" json:"payload"`
 
+	// APIKeyControls optionally restrict client API keys to specific models and usage budgets.
+	// Entries are matched by exact key. Keys without an entry keep the legacy unrestricted behavior.
+	APIKeyControls []APIKeyControl `yaml:"api-key-controls,omitempty" json:"api-key-controls,omitempty"`
+
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+// APIKeyControl defines optional model, prompt, and usage limits for one downstream API key.
+// Budget values <= 0 are treated as unlimited. The Unlimited flag bypasses usage budgets,
+// but model allow/deny rules and per-key prompt settings still apply.
+type APIKeyControl struct {
+	APIKey         string              `yaml:"api-key,omitempty" json:"api-key,omitempty"`
+	Key            string              `yaml:"key,omitempty" json:"key,omitempty"`
+	Name           string              `yaml:"name,omitempty" json:"name,omitempty"`
+	Enabled        *bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Unlimited      bool                `yaml:"unlimited,omitempty" json:"unlimited,omitempty"`
+	Models         []string            `yaml:"models,omitempty" json:"models,omitempty"`
+	ExcludedModels []string            `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+	MaxRequests    int64               `yaml:"max-requests,omitempty" json:"max-requests,omitempty"`
+	MaxInputTokens int64               `yaml:"max-input-tokens,omitempty" json:"max-input-tokens,omitempty"`
+	MaxTotalTokens int64               `yaml:"max-total-tokens,omitempty" json:"max-total-tokens,omitempty"`
+	MaxCostUSD     float64             `yaml:"max-cost-usd,omitempty" json:"max-cost-usd,omitempty"`
+	PresetPrompt   *PresetPromptConfig `yaml:"preset-prompt,omitempty" json:"preset-prompt,omitempty"`
 }
 
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.
@@ -190,6 +229,102 @@ type PprofConfig struct {
 	Enable bool `yaml:"enable" json:"enable"`
 	// Addr is the host:port address for the pprof HTTP server.
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// ConversationLogConfig controls full request/response conversation log storage.
+// It is disabled by default because entries can contain sensitive user and model content.
+type ConversationLogConfig struct {
+	// Enabled toggles writing full conversation entries.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Directory stores JSONL conversation log shards. Relative paths resolve next to config.yaml.
+	Directory string `yaml:"directory,omitempty" json:"directory,omitempty"`
+	// MaxFileSizeMB rotates JSONL shards after this size. Values <= 0 use the default.
+	MaxFileSizeMB int `yaml:"max-file-size-mb,omitempty" json:"max-file-size-mb,omitempty"`
+	// MaxTotalSizeMB bounds total conversation log storage. Values <= 0 use the default.
+	MaxTotalSizeMB int `yaml:"max-total-size-mb,omitempty" json:"max-total-size-mb,omitempty"`
+	// MaxEntryBytes rejects oversized single entries before they reach storage. Values <= 0 use the default.
+	MaxEntryBytes int `yaml:"max-entry-bytes,omitempty" json:"max-entry-bytes,omitempty"`
+}
+
+// DefaultConversationLogConfig returns the safe default full conversation log settings.
+func DefaultConversationLogConfig() ConversationLogConfig {
+	return ConversationLogConfig{
+		Enabled:        false,
+		Directory:      DefaultConversationLogDir,
+		MaxFileSizeMB:  DefaultConversationLogFileMB,
+		MaxTotalSizeMB: DefaultConversationLogTotalMB,
+		MaxEntryBytes:  DefaultConversationLogEntryBytes,
+	}
+}
+
+// Normalize applies safe defaults and clamps invalid full conversation log settings.
+func (c *ConversationLogConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	defaults := DefaultConversationLogConfig()
+	c.Directory = strings.TrimSpace(c.Directory)
+	if c.Directory == "" {
+		c.Directory = defaults.Directory
+	}
+	if c.MaxFileSizeMB <= 0 {
+		c.MaxFileSizeMB = defaults.MaxFileSizeMB
+	}
+	if c.MaxTotalSizeMB <= 0 {
+		c.MaxTotalSizeMB = defaults.MaxTotalSizeMB
+	}
+	if c.MaxEntryBytes <= 0 {
+		c.MaxEntryBytes = defaults.MaxEntryBytes
+	}
+}
+
+// PresetPromptConfig controls optional prompt text inserted only into upstream requests.
+// It is disabled by default because the prompt can change model behavior globally.
+type PresetPromptConfig struct {
+	// Enabled toggles upstream preset prompt injection.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Prompt is inserted into supported upstream chat-like requests when Enabled is true.
+	Prompt string `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+	// MaxBytes bounds the configured prompt size. Values <= 0 use the default.
+	MaxBytes int `yaml:"max-bytes,omitempty" json:"max-bytes,omitempty"`
+}
+
+// DefaultPresetPromptConfig returns the safe default preset prompt settings.
+func DefaultPresetPromptConfig() PresetPromptConfig {
+	return PresetPromptConfig{
+		Enabled:  false,
+		Prompt:   "",
+		MaxBytes: DefaultPresetPromptMaxBytes,
+	}
+}
+
+// Normalize applies safe defaults and clamps preset prompt limits.
+func (c *PresetPromptConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	if c.MaxBytes <= 0 {
+		c.MaxBytes = DefaultPresetPromptMaxBytes
+	}
+	if c.MaxBytes > PresetPromptHardMaxBytes {
+		log.WithFields(log.Fields{
+			"value": c.MaxBytes,
+			"max":   PresetPromptHardMaxBytes,
+		}).Warn("preset-prompt.max-bytes too large; clamping")
+		c.MaxBytes = PresetPromptHardMaxBytes
+	}
+}
+
+// Validate rejects unsafe or ineffective preset prompt settings.
+func (c PresetPromptConfig) Validate() error {
+	if c.Enabled && strings.TrimSpace(c.Prompt) == "" {
+		return errors.New("preset-prompt.prompt must be set when preset-prompt.enabled is true")
+	}
+	promptBytes := len([]byte(c.Prompt))
+	if promptBytes > c.MaxBytes {
+		return fmt.Errorf("preset-prompt.prompt is too large: %d bytes exceeds preset-prompt.max-bytes %d", promptBytes, c.MaxBytes)
+	}
+	return nil
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.
@@ -246,6 +381,79 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+}
+
+// UpstreamConcurrencyConfig configures provider-level upstream concurrency gates.
+type UpstreamConcurrencyConfig struct {
+	// Default applies to providers without an explicit provider limit. Zero means unlimited.
+	Default int `yaml:"default" json:"default"`
+	// Providers maps provider keys such as "codex" to positive concurrency limits.
+	Providers map[string]int `yaml:"providers,omitempty" json:"providers,omitempty"`
+	// QueueTimeoutSeconds bounds how long a request may wait for a permit. When <= 0,
+	// enabled gates use a conservative 30 second timeout.
+	QueueTimeoutSeconds int `yaml:"queue-timeout-seconds" json:"queue-timeout-seconds"`
+}
+
+// Normalize clamps negative values and normalizes provider keys.
+func (c *UpstreamConcurrencyConfig) Normalize() {
+	if c == nil {
+		return
+	}
+	if c.Default < 0 {
+		c.Default = 0
+	}
+	if c.QueueTimeoutSeconds < 0 {
+		c.QueueTimeoutSeconds = 0
+	}
+	if len(c.Providers) == 0 {
+		return
+	}
+	normalized := make(map[string]int, len(c.Providers))
+	for key, limit := range c.Providers {
+		provider := strings.ToLower(strings.TrimSpace(key))
+		if provider == "" {
+			continue
+		}
+		if limit < 0 {
+			limit = 0
+		}
+		normalized[provider] = limit
+	}
+	c.Providers = normalized
+}
+
+// LimitForProvider returns the effective concurrency limit for a provider.
+func (c UpstreamConcurrencyConfig) LimitForProvider(provider string) int {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "" && len(c.Providers) > 0 {
+		if limit, ok := c.Providers[provider]; ok {
+			if limit < 0 {
+				return 0
+			}
+			return limit
+		}
+		for key, limit := range c.Providers {
+			if strings.ToLower(strings.TrimSpace(key)) != provider {
+				continue
+			}
+			if limit < 0 {
+				return 0
+			}
+			return limit
+		}
+	}
+	if c.Default < 0 {
+		return 0
+	}
+	return c.Default
+}
+
+// QueueTimeout returns the configured queue timeout for enabled concurrency gates.
+func (c UpstreamConcurrencyConfig) QueueTimeout() time.Duration {
+	if c.QueueTimeoutSeconds > 0 {
+		return time.Duration(c.QueueTimeoutSeconds) * time.Second
+	}
+	return 30 * time.Second
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
@@ -406,6 +614,9 @@ type ClaudeKey struct {
 	// ExcludedModels lists model IDs that should be excluded for this provider.
 	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
 
+	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
+	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
 	// Cloak configures request cloaking for non-Claude-Code clients.
 	Cloak *CloakConfig `yaml:"cloak,omitempty" json:"cloak,omitempty"`
 
@@ -461,6 +672,9 @@ type CodexKey struct {
 
 	// ExcludedModels lists model IDs that should be excluded for this provider.
 	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+
+	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
+	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 }
 
 func (k CodexKey) GetAPIKey() string  { return k.APIKey }
@@ -505,6 +719,9 @@ type GeminiKey struct {
 
 	// ExcludedModels lists model IDs that should be excluded for this provider.
 	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+
+	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
+	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 }
 
 func (k GeminiKey) GetAPIKey() string  { return k.APIKey }
@@ -549,6 +766,9 @@ type OpenAICompatibility struct {
 
 	// Headers optionally adds extra HTTP headers for requests sent to this provider.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+
+	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
+	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
@@ -618,8 +838,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Host = "" // Default empty: binds to all interfaces (IPv4 + IPv6)
 	cfg.LoggingToFile = false
 	cfg.LogsMaxTotalSizeMB = 0
-	cfg.ErrorLogsMaxFiles = 10
+	cfg.ErrorLogsMaxFiles = 0
 	cfg.UsageStatisticsEnabled = false
+	cfg.ConversationLog = DefaultConversationLogConfig()
+	cfg.PresetPrompt = DefaultPresetPromptConfig()
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
 	cfg.DisableImageGeneration = DisableImageGenerationOff
@@ -680,7 +902,25 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	}
 
 	if cfg.ErrorLogsMaxFiles < 0 {
-		cfg.ErrorLogsMaxFiles = 10
+		cfg.ErrorLogsMaxFiles = 0
+	}
+
+	cfg.ConversationLog.Normalize()
+	cfg.PresetPrompt.Normalize()
+	if errValidatePresetPrompt := cfg.PresetPrompt.Validate(); errValidatePresetPrompt != nil {
+		return nil, errValidatePresetPrompt
+	}
+	for i := range cfg.APIKeyControls {
+		if cfg.APIKeyControls[i].MaxCostUSD < 0 {
+			cfg.APIKeyControls[i].MaxCostUSD = 0
+		}
+		if cfg.APIKeyControls[i].PresetPrompt == nil {
+			continue
+		}
+		cfg.APIKeyControls[i].PresetPrompt.Normalize()
+		if errValidateAPIKeyPresetPrompt := cfg.APIKeyControls[i].PresetPrompt.Validate(); errValidateAPIKeyPresetPrompt != nil {
+			return nil, fmt.Errorf("api-key-controls[%d].preset-prompt: %w", i, errValidateAPIKeyPresetPrompt)
+		}
 	}
 
 	if cfg.RedisUsageQueueRetentionSeconds <= 0 {
@@ -693,6 +933,8 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
 	}
+
+	cfg.UpstreamConcurrency.Normalize()
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.
 	cfg.SanitizeGeminiKeys()
@@ -1359,6 +1601,8 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 	// Check string defaults
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
 		switch fullPath {
+		case "conversation-log.directory":
+			return node.Value == DefaultConversationLogDir
 		case "pprof.addr":
 			return node.Value == DefaultPprofAddr
 		case "remote-management.panel-github-repository":
@@ -1371,6 +1615,14 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 	// Check integer defaults
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!int" {
 		switch fullPath {
+		case "conversation-log.max-file-size-mb":
+			return node.Value == fmt.Sprintf("%d", DefaultConversationLogFileMB)
+		case "conversation-log.max-total-size-mb":
+			return node.Value == fmt.Sprintf("%d", DefaultConversationLogTotalMB)
+		case "conversation-log.max-entry-bytes":
+			return node.Value == fmt.Sprintf("%d", DefaultConversationLogEntryBytes)
+		case "preset-prompt.max-bytes":
+			return node.Value == fmt.Sprintf("%d", DefaultPresetPromptMaxBytes)
 		case "error-logs-max-files":
 			return node.Value == "10"
 		}

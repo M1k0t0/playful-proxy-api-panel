@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/conversationlog"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
 	"golang.org/x/net/context"
@@ -231,6 +233,18 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	return meta
 }
 
+func setReasoningEffortMetadata(meta map[string]any, handlerType, model string, rawJSON []byte) string {
+	if meta == nil {
+		return ""
+	}
+	effort := thinking.ExtractReasoningEffort(rawJSON, handlerType, model)
+	if effort == "" {
+		return ""
+	}
+	meta[coreexecutor.ReasoningEffortMetadataKey] = effort
+	return effort
+}
+
 // headersFromContext extracts the original HTTP request headers from the gin context
 // embedded in the provided context. This allows session affinity selectors to read
 // client headers like X-Amp-Thread-Id.
@@ -302,6 +316,13 @@ type BaseAPIHandler struct {
 
 	// Cfg holds the current application configuration.
 	Cfg *config.SDKConfig
+
+	presetPromptMu     sync.RWMutex
+	presetPromptConfig config.PresetPromptConfig
+	apiKeyControls     []config.APIKeyControl
+
+	conversationLogMu    sync.RWMutex
+	conversationLogStore *conversationlog.Store
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
@@ -536,11 +557,16 @@ func appendAPIResponse(c *gin.Context, data []byte) {
 func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		h.finishConversationLogError(ctx, handlerType, "execute", modelName, rawJSON, false, alt, nil, errMsg)
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
-	payload := rawJSON
+	reasoningEffort := setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	ctx = coreusage.WithReasoningEffort(ctx, reasoningEffort)
+	apiKey := apiKeyFromRequestContext(ctx)
+	presetPrompt, hasPresetPrompt := h.activePresetPromptForAPIKey(apiKey)
+	payload := h.applyPresetPromptToPayloadForAPIKey(handlerType, rawJSON, apiKey)
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -556,6 +582,7 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
+	rec := h.startConversationLog(ctx, handlerType, "execute", providers, normalizedModel, rawJSON, false, alt, reqMeta)
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -571,12 +598,18 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 				addon = hdr.Clone()
 			}
 		}
+		rec.finishNonStream(nil, addon, status, err, reqMeta)
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
-	if !PassthroughHeadersEnabled(h.Cfg) {
-		return resp.Payload, nil, nil
+	responsePayload := resp.Payload
+	if hasPresetPrompt {
+		responsePayload = redactPresetPromptFromPayload(responsePayload, presetPrompt)
 	}
-	return resp.Payload, FilterUpstreamHeaders(resp.Headers), nil
+	rec.finishNonStream(responsePayload, resp.Headers, http.StatusOK, nil, reqMeta)
+	if !PassthroughHeadersEnabled(h.Cfg) {
+		return responsePayload, nil, nil
+	}
+	return responsePayload, FilterUpstreamHeaders(resp.Headers), nil
 }
 
 // ExecuteCountWithAuthManager executes a non-streaming request via the core auth manager.
@@ -584,10 +617,13 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		h.finishConversationLogError(ctx, handlerType, "count", modelName, rawJSON, false, alt, nil, errMsg)
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
+	reasoningEffort := setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	ctx = coreusage.WithReasoningEffort(ctx, reasoningEffort)
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil
@@ -604,6 +640,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
+	rec := h.startConversationLog(ctx, handlerType, "count", providers, normalizedModel, rawJSON, false, alt, reqMeta)
 	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -619,8 +656,10 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 				addon = hdr.Clone()
 			}
 		}
+		rec.finishNonStream(nil, addon, status, err, reqMeta)
 		return nil, nil, &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 	}
+	rec.finishNonStream(resp.Payload, resp.Headers, http.StatusOK, nil, reqMeta)
 	if !PassthroughHeadersEnabled(h.Cfg) {
 		return resp.Payload, nil, nil
 	}
@@ -633,6 +672,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
 	providers, normalizedModel, errMsg := h.getRequestDetails(modelName)
 	if errMsg != nil {
+		h.finishConversationLogError(ctx, handlerType, "stream", modelName, rawJSON, true, alt, nil, errMsg)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		errChan <- errMsg
 		close(errChan)
@@ -640,7 +680,11 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
-	payload := rawJSON
+	reasoningEffort := setReasoningEffortMetadata(reqMeta, handlerType, normalizedModel, rawJSON)
+	ctx = coreusage.WithReasoningEffort(ctx, reasoningEffort)
+	apiKey := apiKeyFromRequestContext(ctx)
+	presetPrompt, hasPresetPrompt := h.activePresetPromptForAPIKey(apiKey)
+	payload := h.applyPresetPromptToPayloadForAPIKey(handlerType, rawJSON, apiKey)
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -656,6 +700,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		Headers:         headersFromContext(ctx),
 	}
 	opts.Metadata = reqMeta
+	rec := h.startConversationLog(ctx, handlerType, "stream", providers, normalizedModel, rawJSON, true, alt, reqMeta)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -672,6 +717,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 				addon = hdr.Clone()
 			}
 		}
+		rec.finishStream(addon, status, err, reqMeta)
 		errChan <- &interfaces.ErrorMessage{StatusCode: status, Error: err, Addon: addon}
 		close(errChan)
 		return nil, nil, errChan
@@ -692,9 +738,19 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 	go func() {
 		defer close(dataChan)
 		defer close(errChan)
+		finalHeaders := cloneHeader(streamResult.Headers)
+		finalStatus := http.StatusOK
+		var finalErr error
+		defer func() {
+			rec.finishStream(finalHeaders, finalStatus, finalErr, reqMeta)
+		}()
 		sentPayload := false
 		bootstrapRetries := 0
 		maxBootstrapRetries := StreamingBootstrapRetries(h.Cfg)
+		var redactor *presetPromptStreamRedactor
+		if hasPresetPrompt {
+			redactor = newPresetPromptStreamRedactor(presetPrompt)
+		}
 
 		sendErr := func(msg *interfaces.ErrorMessage) bool {
 			if ctx == nil {
@@ -722,6 +778,18 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 			}
 		}
 
+		flushRedactor := func() bool {
+			if redactor == nil {
+				return true
+			}
+			redacted := redactor.Flush()
+			if len(redacted) == 0 {
+				return true
+			}
+			rec.captureStreamChunk(redacted)
+			return sendData(cloneBytes(redacted))
+		}
+
 		bootstrapEligible := func(err error) bool {
 			status := statusFromError(err)
 			if status == 0 {
@@ -744,6 +812,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 				if ctx != nil {
 					select {
 					case <-ctx.Done():
+						finalErr = ctx.Err()
 						return
 					case chunk, ok = <-chunks:
 					}
@@ -751,9 +820,16 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 					chunk, ok = <-chunks
 				}
 				if !ok {
+					if !flushRedactor() && ctx != nil {
+						finalErr = ctx.Err()
+					}
 					return
 				}
 				if chunk.Err != nil {
+					if !flushRedactor() && ctx != nil {
+						finalErr = ctx.Err()
+						return
+					}
 					streamErr := chunk.Err
 					// Safe bootstrap recovery: if the upstream fails before any payload bytes are sent,
 					// retry a few times (to allow auth rotation / transient recovery) and then attempt model fallback.
@@ -762,6 +838,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 							bootstrapRetries++
 							retryResult, retryErr := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 							if retryErr == nil {
+								finalHeaders = cloneHeader(retryResult.Headers)
 								if passthroughHeadersEnabled {
 									replaceHeader(upstreamHeaders, FilterUpstreamHeaders(retryResult.Headers))
 								}
@@ -778,6 +855,8 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 							status = code
 						}
 					}
+					finalStatus = status
+					finalErr = streamErr
 					var addon http.Header
 					if he, ok := streamErr.(interface{ Headers() http.Header }); ok && he != nil {
 						if hdr := he.Headers(); hdr != nil {
@@ -790,12 +869,25 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 				if len(chunk.Payload) > 0 {
 					if handlerType == "openai-response" {
 						if err := validateSSEDataJSON(chunk.Payload); err != nil {
+							finalStatus = http.StatusBadGateway
+							finalErr = err
 							_ = sendErr(&interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: err})
 							return
 						}
 					}
 					sentPayload = true
-					if okSendData := sendData(cloneBytes(chunk.Payload)); !okSendData {
+					responseChunk := chunk.Payload
+					if redactor != nil {
+						responseChunk = redactor.Push(chunk.Payload)
+					}
+					if len(responseChunk) == 0 {
+						continue
+					}
+					rec.captureStreamChunk(responseChunk)
+					if okSendData := sendData(cloneBytes(responseChunk)); !okSendData {
+						if ctx != nil {
+							finalErr = ctx.Err()
+						}
 						return
 					}
 				}
@@ -824,12 +916,7 @@ func validateSSEDataJSON(chunk []byte) error {
 		if json.Valid(data) {
 			continue
 		}
-		const max = 512
-		preview := data
-		if len(preview) > max {
-			preview = preview[:max]
-		}
-		return fmt.Errorf("invalid SSE data JSON (len=%d): %q", len(data), preview)
+		return fmt.Errorf("invalid SSE data JSON (len=%d)", len(data))
 	}
 	return nil
 }

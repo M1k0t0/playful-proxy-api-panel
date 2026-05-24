@@ -30,6 +30,8 @@ local-smoke-auth/
 
 # Documentation
 docs/*
+!docs/operations-conversation-logging-and-preset-prompt.md
+!docs/rpi-cpa-translation-concurrency-optimization-plan_CN.md
 AGENTS.md
 CLAUDE.md
 GEMINI.md
@@ -53,3 +55,6 @@ _bmad-output/*
 # macOS
 .DS_Store
 ._*
+
+# Go local cache
+.gocache/

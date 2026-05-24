@@ -22,16 +22,16 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(88vw, 440px);
-  gap: $spacing-md;
+  width: min(92vw, 620px);
+  gap: $spacing-sm;
   text-align: center;
-  animation: splash-enter 0.6s ease-out;
+  animation: splash-enter 0.28s ease-out;
 }
 
 @keyframes splash-enter {
   from {
     opacity: 0;
-    transform: scale(0.9) translateY(20px);
+    transform: scale(0.96) translateY(10px);
   }
   to {
     opacity: 1;
@@ -44,11 +44,12 @@
   width: auto;
   border-radius: $radius-lg;
   box-shadow: $shadow-lg;
-  animation: splash-logo-pulse 1.5s ease-in-out infinite;
+  animation: splash-logo-pulse 0.85s ease-in-out infinite;
 }
 
 @keyframes splash-logo-pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
   }
   50% {
@@ -59,17 +60,22 @@
 .splash-title {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 40px;
-  font-weight: 800;
-  line-height: 1.03;
+  gap: 0;
+  width: 100%;
+  font-size: var(--splash-title-size, clamp(52px, 7.5vw, 90px));
+  font-weight: 900;
+  line-height: 0.9;
   color: var(--text-primary);
   margin: 0;
   letter-spacing: 0;
   text-wrap: balance;
 
+  > span {
+    max-width: 100%;
+  }
+
   @media (max-width: $breakpoint-mobile) {
-    font-size: 30px;
+    font-size: var(--splash-title-size, clamp(42px, 14vw, 64px));
   }
 }
 
@@ -82,7 +88,7 @@
   margin-top: -4px;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-  monospace;
+    monospace;
   letter-spacing: 0;
   overflow-wrap: anywhere;
 
@@ -105,7 +111,7 @@
   height: 100%;
   background: var(--primary-color);
   border-radius: $radius-full;
-  animation: splash-loading 1.2s ease-in-out infinite;
+  animation: splash-loading 0.68s ease-in-out infinite;
   transform-origin: left;
 }
 

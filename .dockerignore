@@ -18,8 +18,11 @@ LICENSE
 # Runtime data folders (should be mounted as volumes)
 auths/*
 logs/*
+data/*
 conv/*
 config.yaml
+web/management-panel/node_modules/*
+web/management-panel/dist/*
 
 # Development/editor
 bin/*

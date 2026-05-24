@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -48,62 +49,68 @@ func (s *Server) acceptMuxConnections(listener net.Listener, httpListener *muxLi
 			continue
 		}
 
-		tlsConn, ok := conn.(*tls.Conn)
-		if ok {
-			if errHandshake := tlsConn.Handshake(); errHandshake != nil {
+		go s.routeMuxConnection(conn, httpListener)
+	}
+}
+
+func (s *Server) routeMuxConnection(conn net.Conn, httpListener *muxListener) {
+	const muxSniffDeadline = 10 * time.Second
+	_ = conn.SetReadDeadline(time.Now().Add(muxSniffDeadline))
+
+	tlsConn, ok := conn.(*tls.Conn)
+	if ok {
+		if errHandshake := tlsConn.Handshake(); errHandshake != nil {
+			if errClose := conn.Close(); errClose != nil {
+				log.Errorf("failed to close connection after TLS handshake error: %v", errClose)
+			}
+			return
+		}
+		proto := strings.TrimSpace(tlsConn.ConnectionState().NegotiatedProtocol)
+		if proto == "h2" || proto == "http/1.1" {
+			if httpListener == nil {
 				if errClose := conn.Close(); errClose != nil {
-					log.Errorf("failed to close connection after TLS handshake error: %v", errClose)
+					log.Errorf("failed to close connection: %v", errClose)
 				}
-				continue
+				return
 			}
-			proto := strings.TrimSpace(tlsConn.ConnectionState().NegotiatedProtocol)
-			if proto == "h2" || proto == "http/1.1" {
-				if httpListener == nil {
-					if errClose := conn.Close(); errClose != nil {
-						log.Errorf("failed to close connection: %v", errClose)
-					}
-					continue
-				}
-				if errPut := httpListener.Put(tlsConn); errPut != nil {
-					if errClose := conn.Close(); errClose != nil {
-						log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
-					}
-				}
-				continue
-			}
-		}
-
-		reader := bufio.NewReader(conn)
-		prefix, errPeek := reader.Peek(1)
-		if errPeek != nil {
-			if errClose := conn.Close(); errClose != nil {
-				log.Errorf("failed to close connection after protocol peek failure: %v", errClose)
-			}
-			continue
-		}
-
-		if isRedisRESPPrefix(prefix[0]) {
-			if !s.managementRoutesEnabled.Load() {
+			if errPut := httpListener.Put(tlsConn); errPut != nil {
 				if errClose := conn.Close(); errClose != nil {
-					log.Errorf("failed to close redis connection while management is disabled: %v", errClose)
+					log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
 				}
-				continue
+			} else {
+				_ = conn.SetReadDeadline(time.Time{})
 			}
-			go s.handleRedisConnection(conn, reader)
-			continue
+			return
 		}
+	}
 
-		if httpListener == nil {
-			if errClose := conn.Close(); errClose != nil {
-				log.Errorf("failed to close connection without HTTP listener: %v", errClose)
-			}
-			continue
+	reader := bufio.NewReader(conn)
+	prefix, errPeek := reader.Peek(1)
+	if errPeek != nil {
+		if errClose := conn.Close(); errClose != nil {
+			log.Errorf("failed to close connection after protocol peek failure: %v", errClose)
 		}
+		return
+	}
 
-		if errPut := httpListener.Put(&bufferedConn{Conn: conn, reader: reader}); errPut != nil {
-			if errClose := conn.Close(); errClose != nil {
-				log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
-			}
+	if isRedisRESPPrefix(prefix[0]) {
+		_ = conn.SetReadDeadline(time.Time{})
+		s.handleRedisConnection(conn, reader)
+		return
+	}
+
+	if httpListener == nil {
+		if errClose := conn.Close(); errClose != nil {
+			log.Errorf("failed to close connection without HTTP listener: %v", errClose)
 		}
+		return
+	}
+
+	if errPut := httpListener.Put(&bufferedConn{Conn: conn, reader: reader}); errPut != nil {
+		if errClose := conn.Close(); errClose != nil {
+			log.Errorf("failed to close connection after HTTP routing failure: %v", errClose)
+		}
+	} else {
+		_ = conn.SetReadDeadline(time.Time{})
 	}
 }

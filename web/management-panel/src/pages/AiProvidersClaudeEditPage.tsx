@@ -171,6 +171,7 @@ export function AiProvidersClaudeEditPage() {
     const hasApiKeyHeader = hasHeader(customHeaders, 'x-api-key');
     const apiKeyFromAuthorization = resolveBearerTokenFromAuthorization(customHeaders);
     const resolvedApiKey = apiKey || apiKeyFromAuthorization;
+    const authIndex = String(form.authIndex ?? '').trim();
 
     if (!resolvedApiKey && !hasApiKeyHeader) {
       const message = t('ai_providers.claude_test_key_required');
@@ -215,6 +216,7 @@ export function AiProvidersClaudeEditPage() {
     try {
       const result = await apiCallApi.request(
         {
+          authIndex: authIndex || undefined,
           method: 'POST',
           url: endpoint,
           header: headers,
@@ -254,6 +256,7 @@ export function AiProvidersClaudeEditPage() {
   }, [
     availableModels,
     form.apiKey,
+    form.authIndex,
     form.baseUrl,
     form.headers,
     isTesting,

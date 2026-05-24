@@ -41,6 +41,28 @@ api-keys:
   - "your-api-key-2"
   - "your-api-key-3"
 
+# Optional per-key model, prompt, and usage controls. Keys without an entry keep the legacy unrestricted behavior.
+# Model patterns support "*". Budget values <= 0 are unlimited. Set unlimited: true to bypass usage budgets.
+# Request, token, and estimated USD budgets are evaluated from usage statistics, so enable usage-statistics-enabled when using budgets.
+api-key-controls:
+  - name: "spark-only"
+    api-key: "your-api-key-1"
+    models:
+      - "gpt-5.3-codex-spark*"
+    unlimited: true
+  - name: "all-models"
+    api-key: "your-api-key-2"
+    models:
+      - "*"
+    max-requests: 0
+    max-total-tokens: 0
+    max-cost-usd: 0
+    # Optional per-key preset prompt. When present, this overrides the global preset-prompt block for this API key.
+    # preset-prompt:
+    #   enabled: true
+    #   prompt: ""
+    #   max-bytes: 32768
+
 # Enable debug logging
 debug: false
 
@@ -60,8 +82,8 @@ logging-to-file: false
 logs-max-total-size-mb: 0
 
 # Maximum number of error log files retained when request logging is disabled.
-# When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
-error-logs-max-files: 10
+# Set to 0 to keep error logs permanently.
+error-logs-max-files: 0
 
 # When false, disable usage statistics aggregation and persistence.
 usage-statistics-enabled: false
@@ -72,6 +94,20 @@ usage-statistics-path: ""
 
 # How often usage statistics are flushed to disk. Defaults to 30 seconds when omitted or <= 0.
 usage-statistics-flush-interval-seconds: 30
+
+# Full conversation logs can store complete request and response bodies. Keep disabled unless needed.
+conversation-log:
+  enabled: false
+  directory: "conversation-logs"
+  max-file-size-mb: 16
+  max-total-size-mb: 256
+  max-entry-bytes: 2097152
+
+# Preset prompt is inserted only into upstream chat-like requests when explicitly enabled.
+preset-prompt:
+  enabled: false
+  prompt: ""
+  max-bytes: 32768
 
 # How long (in seconds) Redis usage queue items are retained in memory for the RESP interface (LPOP/RPOP).
 # Default: 60. Max: 3600.
@@ -101,6 +137,14 @@ max-retry-interval: 30
 # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
 disable-cooling: false
 
+# Optional upstream concurrency gates. Defaults keep current behavior unlimited.
+# Use provider limits to queue bursts before they reach fragile upstream accounts or proxy paths.
+upstream-concurrency:
+  default: 0
+  providers:
+    # codex: 12
+  queue-timeout-seconds: 30
+
 # disable-image-generation supports: false (default), true, or "chat".
 # - true: disable image_generation everywhere (also returns 404 for /v1/images/generations and /v1/images/edits).
 # - "chat": disable image_generation injection on non-images endpoints, but keep /v1/images/generations and /v1/images/edits enabled.
@@ -129,7 +173,7 @@ routing:
   session-affinity-ttl: "1h"
 
 # When true, enable authentication for the WebSocket API (/v1/ws).
-ws-auth: false
+ws-auth: true
 
 # When true, enable Gemini CLI internal endpoints (/v1internal:*).
 # Default is false for safety.
@@ -156,6 +200,7 @@ nonstream-keepalive-interval: 0
 # gemini-api-key:
 #   - api-key: "AIzaSy...01"
 #     prefix: "test" # optional: require calls like "test/gemini-3-pro-preview" to target this credential
+#     disable-cooling: false # optional: per-auth override for auth/model cooldown scheduling
 #     base-url: "https://generativelanguage.googleapis.com"
 #     headers:
 #       X-Custom-Header: "custom-value"
@@ -175,6 +220,7 @@ nonstream-keepalive-interval: 0
 # codex-api-key:
 #   - api-key: "sk-atSM..."
 #     prefix: "test" # optional: require calls like "test/gpt-5-codex" to target this credential
+#     disable-cooling: false # optional: per-auth override for auth/model cooldown scheduling
 #     base-url: "https://www.example.com" # use the custom codex API endpoint
 #     headers:
 #       X-Custom-Header: "custom-value"
@@ -194,6 +240,7 @@ nonstream-keepalive-interval: 0
 #   - api-key: "sk-atSM..." # use the official claude API key, no need to set the base url
 #   - api-key: "sk-atSM..."
 #     prefix: "test" # optional: require calls like "test/claude-sonnet-latest" to target this credential
+#     disable-cooling: false # optional: per-auth override for auth/model cooldown scheduling
 #     base-url: "https://www.example.com" # use the custom claude API endpoint
 #     headers:
 #       X-Custom-Header: "custom-value"
@@ -249,6 +296,7 @@ nonstream-keepalive-interval: 0
 #     disabled: false # optional: set to true to disable this provider without removing it
 #     prefix: "test" # optional: require calls like "test/kimi-k2" to target this provider's credentials
 #     base-url: "https://openrouter.ai/api/v1" # The base URL of the provider.
+#     disable-cooling: false # optional: per-provider override for auth/model cooldown scheduling
 #     headers:
 #       X-Custom-Header: "custom-value"
 #     api-key-entries:

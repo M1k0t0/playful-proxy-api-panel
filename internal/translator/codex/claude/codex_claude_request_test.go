@@ -136,6 +136,20 @@ func TestConvertClaudeRequestToCodex_ParallelToolCalls(t *testing.T) {
 	}
 }
 
+func TestConvertClaudeRequestToCodex_NormalizesServiceTierFast(t *testing.T) {
+	inputJSON := `{
+		"model": "claude-3-opus",
+		"service_tier": "fast",
+		"messages": [{"role": "user", "content": "hello"}]
+	}`
+
+	result := ConvertClaudeRequestToCodex("gpt-5.5-codex", []byte(inputJSON), false)
+	resultJSON := gjson.ParseBytes(result)
+	if got := resultJSON.Get("service_tier").String(); got != "priority" {
+		t.Fatalf("service_tier = %q, want priority. Output: %s", got, string(result))
+	}
+}
+
 func TestConvertClaudeRequestToCodex_ToolChoiceModeMapping(t *testing.T) {
 	tests := []struct {
 		name                string

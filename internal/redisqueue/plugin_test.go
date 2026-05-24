@@ -23,14 +23,15 @@ func TestUsageQueuePluginPayloadIncludesStableFieldsAndSuccess(t *testing.T) {
 
 		plugin := &usageQueuePlugin{}
 		plugin.HandleUsage(ctx, coreusage.Record{
-			Provider:    "openai",
-			Model:       "gpt-5.4",
-			APIKey:      "test-key",
-			AuthIndex:   "0",
-			AuthType:    "apikey",
-			Source:      "user@example.com",
-			RequestedAt: time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC),
-			Latency:     1500 * time.Millisecond,
+			Provider:        "openai",
+			Model:           "gpt-5.4",
+			APIKey:          "test-key",
+			AuthIndex:       "0",
+			AuthType:        "apikey",
+			Source:          "user@example.com",
+			ReasoningEffort: "medium",
+			RequestedAt:     time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC),
+			Latency:         1500 * time.Millisecond,
 			Detail: coreusage.Detail{
 				InputTokens:  10,
 				OutputTokens: 20,
@@ -44,6 +45,7 @@ func TestUsageQueuePluginPayloadIncludesStableFieldsAndSuccess(t *testing.T) {
 		requireStringField(t, payload, "endpoint", "POST /v1/chat/completions")
 		requireStringField(t, payload, "auth_type", "apikey")
 		requireStringField(t, payload, "request_id", "ctx-request-id")
+		requireStringField(t, payload, "reasoning_effort", "medium")
 		requireBoolField(t, payload, "failed", false)
 	})
 }
@@ -120,6 +122,45 @@ func TestUsageQueuePluginAsyncIgnoresRecycledGinContext(t *testing.T) {
 		requireStringField(t, payload, "endpoint", "POST /v1/chat/completions")
 		requireStringField(t, payload, "request_id", "ctx-request-id")
 		requireBoolField(t, payload, "failed", true)
+	})
+}
+
+func TestSubscribeUsageReceivesPayloadWithoutQueueing(t *testing.T) {
+	withEnabledQueue(t, func() {
+		messages, unsubscribe := SubscribeUsage()
+		defer unsubscribe()
+
+		Enqueue([]byte("usage-payload"))
+
+		select {
+		case got := <-messages:
+			if string(got) != "usage-payload" {
+				t.Fatalf("subscriber payload = %q, want %q", string(got), "usage-payload")
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for subscriber payload")
+		}
+
+		if items := PopOldest(10); len(items) != 0 {
+			t.Fatalf("expected subscribed payload to bypass queue, got %d queued items", len(items))
+		}
+	})
+}
+
+func TestSubscribeUsageUnsubscribeClosesChannel(t *testing.T) {
+	withEnabledQueue(t, func() {
+		messages, unsubscribe := SubscribeUsage()
+		unsubscribe()
+		unsubscribe()
+
+		select {
+		case _, ok := <-messages:
+			if ok {
+				t.Fatalf("expected channel to close after unsubscribe")
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for channel close")
+		}
 	})
 }
 

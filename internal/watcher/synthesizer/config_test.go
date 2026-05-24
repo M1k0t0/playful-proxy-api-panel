@@ -42,6 +42,17 @@ func TestConfigSynthesizer_Synthesize_NilConfig(t *testing.T) {
 	}
 }
 
+func requireDisableCoolingMetadata(t *testing.T, auth *coreauth.Auth) {
+	t.Helper()
+
+	if auth == nil {
+		t.Fatal("expected auth, got nil")
+	}
+	if v, ok := auth.Metadata["disable_cooling"].(bool); !ok || !v {
+		t.Fatalf("expected disable_cooling=true, got %v", auth.Metadata["disable_cooling"])
+	}
+}
+
 func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -68,9 +79,22 @@ func TestConfigSynthesizer_GeminiKeys(t *testing.T) {
 				if auths[0].Attributes["api_key"] != "test-key-123" {
 					t.Errorf("expected api_key test-key-123, got %s", auths[0].Attributes["api_key"])
 				}
+				if auths[0].Metadata != nil {
+					t.Errorf("expected metadata to be nil when disable-cooling is not set, got %v", auths[0].Metadata)
+				}
 				if auths[0].Status != coreauth.StatusActive {
 					t.Errorf("expected status active, got %s", auths[0].Status)
 				}
+			},
+		},
+		{
+			name: "gemini key disable cooling",
+			geminiKeys: []config.GeminiKey{
+				{APIKey: "test-key-123", Prefix: "team-a", DisableCooling: true},
+			},
+			wantLen: 1,
+			validate: func(t *testing.T, auths []*coreauth.Auth) {
+				requireDisableCoolingMetadata(t, auths[0])
 			},
 		},
 		{
@@ -160,9 +184,10 @@ func TestConfigSynthesizer_ClaudeKeys(t *testing.T) {
 		Config: &config.Config{
 			ClaudeKey: []config.ClaudeKey{
 				{
-					APIKey:  "sk-ant-api-xxx",
-					Prefix:  "main",
-					BaseURL: "https://api.anthropic.com",
+					APIKey:         "sk-ant-api-xxx",
+					Prefix:         "main",
+					BaseURL:        "https://api.anthropic.com",
+					DisableCooling: true,
 					Models: []config.ClaudeModel{
 						{Name: "claude-3-opus"},
 						{Name: "claude-3-sonnet"},
@@ -197,6 +222,7 @@ func TestConfigSynthesizer_ClaudeKeys(t *testing.T) {
 	if _, ok := auths[0].Attributes["models_hash"]; !ok {
 		t.Error("expected models_hash in attributes")
 	}
+	requireDisableCoolingMetadata(t, auths[0])
 }
 
 func TestConfigSynthesizer_ClaudeKeys_SkipsEmptyAndHeaders(t *testing.T) {
@@ -231,11 +257,12 @@ func TestConfigSynthesizer_CodexKeys(t *testing.T) {
 		Config: &config.Config{
 			CodexKey: []config.CodexKey{
 				{
-					APIKey:     "codex-key-123",
-					Prefix:     "dev",
-					BaseURL:    "https://api.openai.com",
-					ProxyURL:   "http://proxy.local",
-					Websockets: true,
+					APIKey:         "codex-key-123",
+					Prefix:         "dev",
+					BaseURL:        "https://api.openai.com",
+					ProxyURL:       "http://proxy.local",
+					Websockets:     true,
+					DisableCooling: true,
 				},
 			},
 		},
@@ -263,6 +290,7 @@ func TestConfigSynthesizer_CodexKeys(t *testing.T) {
 	if auths[0].Attributes["websockets"] != "true" {
 		t.Errorf("expected websockets=true, got %s", auths[0].Attributes["websockets"])
 	}
+	requireDisableCoolingMetadata(t, auths[0])
 }
 
 func TestConfigSynthesizer_CodexKeys_SkipsEmptyAndHeaders(t *testing.T) {
@@ -293,16 +321,18 @@ func TestConfigSynthesizer_CodexKeys_SkipsEmptyAndHeaders(t *testing.T) {
 
 func TestConfigSynthesizer_OpenAICompat(t *testing.T) {
 	tests := []struct {
-		name    string
-		compat  []config.OpenAICompatibility
-		wantLen int
+		name     string
+		compat   []config.OpenAICompatibility
+		wantLen  int
+		validate func(*testing.T, []*coreauth.Auth)
 	}{
 		{
 			name: "with APIKeyEntries",
 			compat: []config.OpenAICompatibility{
 				{
-					Name:    "CustomProvider",
-					BaseURL: "https://custom.api.com",
+					Name:           "CustomProvider",
+					BaseURL:        "https://custom.api.com",
+					DisableCooling: true,
 					APIKeyEntries: []config.OpenAICompatibilityAPIKey{
 						{APIKey: "key-1"},
 						{APIKey: "key-2"},
@@ -310,6 +340,11 @@ func TestConfigSynthesizer_OpenAICompat(t *testing.T) {
 				},
 			},
 			wantLen: 2,
+			validate: func(t *testing.T, auths []*coreauth.Auth) {
+				for i := range auths {
+					requireDisableCoolingMetadata(t, auths[i])
+				}
+			},
 		},
 		{
 			name: "empty APIKeyEntries included (legacy)",
@@ -364,6 +399,9 @@ func TestConfigSynthesizer_OpenAICompat(t *testing.T) {
 			}
 			if len(auths) != tt.wantLen {
 				t.Fatalf("expected %d auths, got %d", tt.wantLen, len(auths))
+			}
+			if tt.validate != nil {
+				tt.validate(t, auths)
 			}
 		})
 	}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -11,11 +11,12 @@ import { detectApiBaseFromLocation, normalizeApiBase } from '@/utils/connection'
 import { LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER } from '@/utils/constants';
 import { isSupportedLanguage } from '@/utils/language';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
+import { useSplashTitleFit } from '@/hooks/useSplashTitleFit';
 import type { ApiError } from '@/types';
 import styles from './LoginPage.module.scss';
 
 /**
- * 将 API 错误转换为本地化的用户友好消息
+ * Converts API errors into localized, user-friendly messages.
  */
 type RedirectState = { from?: { pathname?: string } };
 
@@ -32,7 +33,7 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
           ? error
           : '';
 
-  // 根据 HTTP 状态码判断
+  // Classify by HTTP status code.
   if (status === 401) {
     return t('login.error_unauthorized');
   }
@@ -46,7 +47,7 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
     return t('login.error_server');
   }
 
-  // 根据 axios 错误码判断
+  // Classify by axios error code.
   if (code === 'ECONNABORTED' || message.toLowerCase().includes('timeout')) {
     return t('login.error_timeout');
   }
@@ -57,12 +58,12 @@ function getLocalizedErrorMessage(error: unknown, t: (key: string) => string): s
     return t('login.error_ssl');
   }
 
-  // 检查 CORS 错误
+  // Detect CORS-style browser errors.
   if (message.toLowerCase().includes('cors') || message.toLowerCase().includes('cross-origin')) {
     return t('login.error_cors');
   }
 
-  // 默认错误消息
+  // Default error message.
   return t('login.error_invalid');
 }
 
@@ -89,16 +90,20 @@ export function LoginPage() {
   const [autoLoading, setAutoLoading] = useState(true);
   const [autoLoginSuccess, setAutoLoginSuccess] = useState(false);
   const [error, setError] = useState('');
+  const splashContentRef = useRef<HTMLDivElement>(null);
+  const splashTitleRef = useRef<HTMLHeadingElement>(null);
 
   const detectedBase = useMemo(() => detectApiBaseFromLocation(), []);
+  const splashTitle = t('splash.title');
   const languageOptions = useMemo(
     () =>
       LANGUAGE_ORDER.map((lang) => ({
         value: lang,
-        label: t(LANGUAGE_LABEL_KEYS[lang])
+        label: t(LANGUAGE_LABEL_KEYS[lang]),
       })),
     [t]
   );
+  useSplashTitleFit(splashContentRef, splashTitleRef, splashTitle);
   const handleLanguageChange = useCallback(
     (selectedLanguage: string) => {
       if (!isSupportedLanguage(selectedLanguage)) {
@@ -115,7 +120,7 @@ export function LoginPage() {
         const autoLoggedIn = await restoreSession();
         if (autoLoggedIn) {
           setAutoLoginSuccess(true);
-          // 延迟跳转，让用户看到成功动画
+          // Delay navigation long enough to show the success animation.
           setTimeout(() => {
             const redirect = (location.state as RedirectState | null)?.from?.pathname || '/';
             navigate(redirect, { replace: true });
@@ -149,7 +154,7 @@ export function LoginPage() {
       await login({
         apiBase: baseToUse,
         managementKey: managementKey.trim(),
-        rememberPassword
+        rememberPassword,
       });
       showNotification(t('common.connected_status'), 'success');
       navigate('/', { replace: true });
@@ -160,7 +165,16 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, detectedBase, login, managementKey, navigate, rememberPassword, showNotification, t]);
+  }, [
+    apiBase,
+    detectedBase,
+    login,
+    managementKey,
+    navigate,
+    rememberPassword,
+    showNotification,
+    t,
+  ]);
 
   const handleSubmitKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -177,27 +191,32 @@ export function LoginPage() {
     return <Navigate to={redirect} replace />;
   }
 
-  // 显示启动动画（自动登录中或自动登录成功）
+  // Show the splash animation while auto-login is running or has just succeeded.
   const showSplash = autoLoading || autoLoginSuccess;
 
   return (
     <div className={styles.container}>
-      {/* 左侧品牌展示区 */}
+      {/* Left brand panel */}
       <div className={styles.brandPanel}>
         <div className={styles.brandContent}>
-          <span className={styles.brandWord}>CLI</span>
+          <span className={styles.brandWord}>PLAYFUL</span>
           <span className={styles.brandWord}>PROXY</span>
           <span className={styles.brandWord}>API</span>
+          <span className={styles.brandWord}>PANEL</span>
         </div>
       </div>
 
-      {/* 右侧功能交互区 */}
+      {/* Right interaction area */}
       <div className={styles.formPanel}>
         {showSplash ? (
-          /* 启动动画 */
-          <div className={styles.splashContent}>
-            <img src={INLINE_LOGO_JPEG} alt="PPAP" className={styles.splashLogo} />
-            <h1 className={styles.splashTitle} aria-label={t('splash.title')}>
+          /* Splash animation */
+          <div ref={splashContentRef} className={styles.splashContent}>
+            <img
+              src={INLINE_LOGO_JPEG}
+              alt="Playful Proxy API Panel"
+              className={styles.splashLogo}
+            />
+            <h1 ref={splashTitleRef} className={styles.splashTitle} aria-label={splashTitle}>
               <span>{t('splash.title_line_1')}</span>
               <span>{t('splash.title_line_2')}</span>
             </h1>
@@ -207,12 +226,12 @@ export function LoginPage() {
             </div>
           </div>
         ) : (
-          /* 登录表单 */
+          /* Login form */
           <div className={styles.formContent}>
             {/* Logo */}
-            <img src={INLINE_LOGO_JPEG} alt="Logo" className={styles.logo} />
+            <img src={INLINE_LOGO_JPEG} alt="Playful Proxy API Panel" className={styles.logo} />
 
-            {/* 登录表单卡片 */}
+            {/* Login form panel */}
             <div className={styles.loginCard}>
               <div className={styles.loginHeader}>
                 <div className={styles.titleRow}>

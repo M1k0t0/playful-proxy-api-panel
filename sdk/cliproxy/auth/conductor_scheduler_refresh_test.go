@@ -5,13 +5,15 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 )
 
 type schedulerProviderTestExecutor struct {
-	provider string
+	provider   string
+	refreshErr error
 }
 
 func (e schedulerProviderTestExecutor) Identifier() string { return e.provider }
@@ -25,6 +27,9 @@ func (e schedulerProviderTestExecutor) ExecuteStream(ctx context.Context, auth *
 }
 
 func (e schedulerProviderTestExecutor) Refresh(ctx context.Context, auth *Auth) (*Auth, error) {
+	if e.refreshErr != nil {
+		return nil, e.refreshErr
+	}
 	return auth, nil
 }
 
@@ -34,6 +39,55 @@ func (e schedulerProviderTestExecutor) CountTokens(ctx context.Context, auth *Au
 
 func (e schedulerProviderTestExecutor) HttpRequest(ctx context.Context, auth *Auth, req *http.Request) (*http.Response, error) {
 	return nil, nil
+}
+
+func TestManagerRefreshAuthFailureMarksAuthUnavailableForRetry(t *testing.T) {
+	ctx := context.Background()
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.SetRetryConfig(1, 10*time.Minute, 0)
+	manager.RegisterExecutor(schedulerProviderTestExecutor{
+		provider:   "codex",
+		refreshErr: errors.New("refresh failed"),
+	})
+
+	model := "gpt-5.5-codex"
+	auth := &Auth{
+		ID:       "refresh-failure-auth",
+		Provider: "codex",
+		Status:   StatusActive,
+	}
+	registerSchedulerModels(t, "codex", model, auth.ID)
+	if _, errRegister := manager.Register(ctx, auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	manager.refreshAuth(ctx, auth.ID)
+
+	updated, ok := manager.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to remain registered")
+	}
+	if !updated.Unavailable {
+		t.Fatalf("auth.Unavailable = false, want true")
+	}
+	if updated.Status != StatusError {
+		t.Fatalf("auth.Status = %q, want %q", updated.Status, StatusError)
+	}
+	if updated.NextRetryAfter.IsZero() {
+		t.Fatal("auth.NextRetryAfter = zero, want refresh failure cooldown")
+	}
+	if updated.NextRefreshAfter.IsZero() {
+		t.Fatal("auth.NextRefreshAfter = zero, want refresh retry backoff")
+	}
+
+	_, errPick := manager.scheduler.pickSingle(ctx, "codex", model, cliproxyexecutor.Options{}, nil)
+	if errPick == nil {
+		t.Fatal("pickSingle() error = nil, want cooldown/auth unavailable error")
+	}
+	wait, shouldRetry := manager.shouldRetryAfterError(errPick, 0, []string{"codex"}, model, 10*time.Minute)
+	if !shouldRetry || wait <= 0 {
+		t.Fatalf("shouldRetryAfterError() = (%v, %v), want positive retry wait", wait, shouldRetry)
+	}
 }
 
 func TestManager_RefreshSchedulerEntry_RebuildsSupportedModelSetAfterModelRegistration(t *testing.T) {

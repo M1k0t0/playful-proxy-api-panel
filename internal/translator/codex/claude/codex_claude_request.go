@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
+	codexcompat "github.com/router-for-me/CLIProxyAPI/v6/internal/translator/codex/compat"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -324,6 +325,9 @@ func ConvertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool) 
 	template, _ = sjson.SetBytes(template, "stream", true)
 	template, _ = sjson.SetBytes(template, "store", false)
 	template, _ = sjson.SetBytes(template, "include", []string{"reasoning.encrypted_content"})
+	if serviceTier, ok := codexcompat.NormalizeServiceTierValue(rootResult.Get("service_tier").String()); ok {
+		template, _ = sjson.SetBytes(template, "service_tier", serviceTier)
+	}
 
 	return template
 }

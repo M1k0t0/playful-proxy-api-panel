@@ -75,13 +75,14 @@ func (p *usageQueuePlugin) HandleUsage(ctx context.Context, record coreusage.Rec
 	}
 
 	payload, err := json.Marshal(queuedUsageDetail{
-		RequestDetail: detail,
-		Provider:      provider,
-		Model:         modelName,
-		Endpoint:      resolveEndpoint(ctx),
-		AuthType:      authType,
-		APIKey:        apiKey,
-		RequestID:     requestID,
+		RequestDetail:   detail,
+		Provider:        provider,
+		Model:           modelName,
+		Endpoint:        resolveEndpoint(ctx),
+		AuthType:        authType,
+		APIKey:          apiKey,
+		RequestID:       requestID,
+		ReasoningEffort: strings.TrimSpace(record.ReasoningEffort),
 	})
 	if err != nil {
 		return
@@ -97,6 +98,8 @@ type queuedUsageDetail struct {
 	AuthType  string `json:"auth_type"`
 	APIKey    string `json:"api_key"`
 	RequestID string `json:"request_id"`
+	// ReasoningEffort is omitted for non-thinking requests to keep old consumers stable.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 func resolveSuccess(ctx context.Context) bool {

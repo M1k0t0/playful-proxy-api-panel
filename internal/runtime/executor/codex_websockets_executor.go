@@ -883,12 +883,17 @@ func codexHeaderDefaults(cfg *config.Config, auth *cliproxyauth.Auth) (string, s
 	if cfg == nil || auth == nil {
 		return "", ""
 	}
-	if auth.Attributes != nil {
-		if v := strings.TrimSpace(auth.Attributes["api_key"]); v != "" {
-			return "", ""
-		}
+	if codexAuthUsesAPIKey(auth) {
+		return "", ""
 	}
 	return strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent), strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
+}
+
+func codexAuthUsesAPIKey(auth *cliproxyauth.Auth) bool {
+	if auth == nil || auth.Attributes == nil {
+		return false
+	}
+	return strings.TrimSpace(auth.Attributes["api_key"]) != ""
 }
 
 func ensureHeaderWithPriority(target http.Header, source http.Header, key, configValue, fallbackValue string) {

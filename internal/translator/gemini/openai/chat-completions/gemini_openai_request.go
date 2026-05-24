@@ -343,6 +343,9 @@ func ConvertOpenAIRequestToGemini(modelName string, inputRawJSON []byte, _ bool)
 					}
 					fnRawBytes := []byte(fnRaw)
 					fnRawBytes, _ = sjson.SetBytes(fnRawBytes, "name", util.SanitizeFunctionName(fn.Get("name").String()))
+					if schema := gjson.GetBytes(fnRawBytes, "parametersJsonSchema"); schema.Exists() {
+						fnRawBytes, _ = sjson.SetRawBytes(fnRawBytes, "parametersJsonSchema", []byte(common.SanitizeJSONSchemaRaw(schema.Raw)))
+					}
 					fnRaw = string(fnRawBytes)
 					fnRaw, _ = sjson.Delete(fnRaw, "strict")
 					if !hasFunction {

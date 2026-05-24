@@ -28,7 +28,11 @@ archives:
       - LICENSE
       - README.md
       - README_CN.md
+      - README_JA.md
       - config.example.yaml
+      - config.docker.example.yaml
+      - docker-compose.yml
+      - .env.example
 
 checksum:
   name_template: 'checksums.txt'

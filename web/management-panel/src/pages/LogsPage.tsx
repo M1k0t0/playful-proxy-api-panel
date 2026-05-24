@@ -23,20 +23,16 @@ import {
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
-import { logsApi } from '@/services/api/logs';
+import { logsApi, type LogDataTarget, type LogStorageResponse } from '@/services/api/logs';
 import { copyToClipboard } from '@/utils/clipboard';
 import { downloadBlob } from '@/utils/download';
 import { MANAGEMENT_API_PREFIX } from '@/utils/constants';
 import { formatUnixTimestamp } from '@/utils/format';
-import {
-  HTTP_METHODS,
-  STATUS_GROUPS,
-  resolveStatusGroup,
-  type LogState,
-} from './hooks/logTypes';
+import { HTTP_METHODS, STATUS_GROUPS, resolveStatusGroup, type LogState } from './hooks/logTypes';
 import { parseLogLine } from './hooks/logParsing';
 import { useLogFilters } from './hooks/useLogFilters';
 import { isNearBottom, useLogScroller } from './hooks/useLogScroller';
+import { ConversationLogsPanel } from './ConversationLogsPanel';
 import styles from './LogsPage.module.scss';
 
 interface ErrorLogItem {
@@ -45,11 +41,18 @@ interface ErrorLogItem {
   modified?: number;
 }
 
-// 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
+// Render only the newest lines first, then expand upward as the user scrolls.
 const INITIAL_DISPLAY_LINES = 100;
 const MAX_BUFFER_LINES = 10000;
 const LONG_PRESS_MS = 650;
 const LONG_PRESS_MOVE_THRESHOLD = 10;
+
+const STORAGE_TARGETS: Exclude<LogDataTarget, 'all'>[] = [
+  'application',
+  'request',
+  'error-request',
+  'temporary',
+];
 
 const getErrorMessage = (err: unknown): string => {
   if (err instanceof Error) return err.message;
@@ -61,7 +64,23 @@ const getErrorMessage = (err: unknown): string => {
   return typeof message === 'string' ? message : '';
 };
 
-type TabType = 'logs' | 'errors';
+const isLoggingDisabledError = (err: unknown): boolean =>
+  getErrorMessage(err).trim().toLowerCase() === 'logging to file disabled';
+
+type TabType = 'logs' | 'errors' | 'conversations';
+
+const formatBytes = (value?: number): string => {
+  const bytes = Number.isFinite(value) && value ? Math.max(value, 0) : 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unitIndex]}`;
+};
 
 export function LogsPage() {
   const { t } = useTranslation();
@@ -89,6 +108,8 @@ export function LogsPage() {
   const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
   const [errorLogsError, setErrorLogsError] = useState('');
+  const [logStorage, setLogStorage] = useState<LogStorageResponse | null>(null);
+  const [storageLoading, setStorageLoading] = useState(false);
   const [requestLogId, setRequestLogId] = useState<string | null>(null);
   const [requestLogDownloading, setRequestLogDownloading] = useState(false);
 
@@ -102,10 +123,44 @@ export function LogsPage() {
   const logRequestInFlightRef = useRef(false);
   const pendingFullReloadRef = useRef(false);
 
-  // 保存最新时间戳用于增量获取
+  // Track the latest timestamp for incremental fetching.
   const latestTimestampRef = useRef<number>(0);
 
   const disableControls = connectionStatus !== 'connected';
+
+  const logTargetLabels: Record<LogDataTarget, string> = {
+    application: t('logs.storage_application'),
+    request: t('logs.storage_request'),
+    'error-request': t('logs.storage_error_request'),
+    temporary: t('logs.storage_temporary'),
+    all: t('logs.storage_all'),
+  };
+
+  const storageBuckets: Record<Exclude<LogDataTarget, 'all'>, { size: number; files: number }> = {
+    application: logStorage?.application ?? { size: 0, files: 0 },
+    request: logStorage?.request ?? { size: 0, files: 0 },
+    'error-request': logStorage?.['error-request'] ?? { size: 0, files: 0 },
+    temporary: logStorage?.temporary ?? { size: 0, files: 0 },
+  };
+
+  const loadLogStorage = async () => {
+    if (connectionStatus !== 'connected') {
+      setStorageLoading(false);
+      return;
+    }
+    setStorageLoading(true);
+    try {
+      const data = await logsApi.fetchStorage();
+      setLogStorage(data);
+    } catch (err: unknown) {
+      if (!isLoggingDisabledError(err)) {
+        console.error('Failed to load log storage:', err);
+      }
+      setLogStorage(null);
+    } finally {
+      setStorageLoading(false);
+    }
+  };
 
   const loadLogs = async (incremental = false) => {
     if (connectionStatus !== 'connected') {
@@ -139,7 +194,7 @@ export function LogsPage() {
         incremental && latestTimestampRef.current > 0 ? { after: latestTimestampRef.current } : {};
       const data = await logsApi.fetchLogs(params);
 
-      // 更新时间戳
+      // Keep the latest timestamp for incremental polling.
       if (data['latest-timestamp']) {
         latestTimestampRef.current = data['latest-timestamp'];
       }
@@ -147,7 +202,7 @@ export function LogsPage() {
       const newLines = Array.isArray(data.lines) ? data.lines : [];
 
       if (incremental && newLines.length > 0) {
-        // 增量更新：追加新日志并限制缓冲区大小（避免内存与渲染膨胀）
+        // Append new lines while bounding memory and render cost.
         setLogState((prev) => {
           const prevRenderedCount = prev.buffer.length - prev.visibleFrom;
           const combined = [...prev.buffer, ...newLines];
@@ -155,7 +210,7 @@ export function LogsPage() {
           const buffer = dropCount > 0 ? combined.slice(dropCount) : combined;
           let visibleFrom = Math.max(prev.visibleFrom - dropCount, 0);
 
-          // 若用户停留在底部（跟随最新日志），则保持“渲染窗口”大小不变，避免无限增长
+          // When following the newest lines, keep the rendered window stable.
           if (stickToBottom) {
             visibleFrom = Math.max(buffer.length - prevRenderedCount, 0);
           }
@@ -163,13 +218,15 @@ export function LogsPage() {
           return { buffer, visibleFrom };
         });
       } else if (!incremental) {
-        // 全量加载：默认只渲染最后 100 行，向上滚动再展开更多
+        // Full reload starts at the newest lines; scrolling up reveals more.
         const buffer = newLines.slice(-MAX_BUFFER_LINES);
         const visibleFrom = Math.max(buffer.length - INITIAL_DISPLAY_LINES, 0);
         setLogState({ buffer, visibleFrom });
       }
     } catch (err: unknown) {
-      console.error('Failed to load logs:', err);
+      if (!isLoggingDisabledError(err)) {
+        console.error('Failed to load logs:', err);
+      }
       if (!incremental) {
         setError(getErrorMessage(err) || t('logs.load_error'));
       }
@@ -185,20 +242,28 @@ export function LogsPage() {
     }
   };
 
-  useHeaderRefresh(() => loadLogs(false));
-
-  const clearLogs = async () => {
+  const clearLogData = async (target: LogDataTarget) => {
+    const label = logTargetLabels[target];
     showConfirmation({
-      title: t('logs.clear_confirm_title', { defaultValue: 'Clear Logs' }),
-      message: t('logs.clear_confirm'),
+      title: t('logs.clear_data_confirm_title', { label }),
+      message: t('logs.clear_data_confirm', { label }),
       variant: 'danger',
       confirmText: t('common.confirm'),
       onConfirm: async () => {
         try {
-          await logsApi.clearLogs();
-          setLogState({ buffer: [], visibleFrom: 0 });
-          latestTimestampRef.current = 0;
-          showNotification(t('logs.clear_success'), 'success');
+          await logsApi.clearLogs(target);
+          if (target === 'application' || target === 'all') {
+            setLogState({ buffer: [], visibleFrom: 0 });
+            latestTimestampRef.current = 0;
+          }
+          if (target === 'error-request' || target === 'all') {
+            setErrorLogs([]);
+          }
+          await loadLogStorage();
+          if (target === 'error-request' && activeTab === 'errors') {
+            await loadErrorLogs();
+          }
+          showNotification(t('logs.clear_data_success', { label }), 'success');
         } catch (err: unknown) {
           const message = getErrorMessage(err);
           showNotification(
@@ -226,10 +291,12 @@ export function LogsPage() {
     setErrorLogsError('');
     try {
       const res = await logsApi.fetchErrorLogs();
-      // API 返回 { files: [...] }
+      // API returns { files: [...] }.
       setErrorLogs(Array.isArray(res.files) ? res.files : []);
     } catch (err: unknown) {
-      console.error('Failed to load error logs:', err);
+      if (!isLoggingDisabledError(err)) {
+        console.error('Failed to load error logs:', err);
+      }
       setErrorLogs([]);
       const message = getErrorMessage(err);
       setErrorLogsError(
@@ -239,6 +306,14 @@ export function LogsPage() {
       setLoadingErrors(false);
     }
   };
+
+  useHeaderRefresh(() => {
+    void loadLogs(false);
+    void loadLogStorage();
+    if (activeTab === 'errors') {
+      void loadErrorLogs();
+    }
+  });
 
   const downloadErrorLog = async (name: string) => {
     try {
@@ -258,6 +333,7 @@ export function LogsPage() {
     if (connectionStatus === 'connected') {
       latestTimestampRef.current = 0;
       loadLogs(false);
+      loadLogStorage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionStatus]);
@@ -336,14 +412,14 @@ export function LogsPage() {
     return {
       filteredParsedLines: filteredParsed,
       filteredLines: filteredParsed.map((line) => line.raw),
-      removedCount: Math.max(baseLines.length - filteredParsed.length, 0)
+      removedCount: Math.max(baseLines.length - filteredParsed.length, 0),
     };
   }, [
     baseLines,
     filters.methodFilterSet,
     filters.pathFilterSet,
     filters.statusFilterSet,
-    parsedSearchLines
+    parsedSearchLines,
   ]);
 
   const parsedVisibleLines = useMemo(
@@ -360,7 +436,7 @@ export function LogsPage() {
     isSearching,
     filteredLineCount: filteredLines.length,
     hasStructuredFilters: filters.hasStructuredFilters,
-    showRawLogs
+    showRawLogs,
   });
 
   logScrollerRef.current = scroller;
@@ -426,7 +502,7 @@ export function LogsPage() {
       const response = await logsApi.downloadRequestLogById(id);
       downloadBlob({
         filename: `request-${id}.log`,
-        blob: new Blob([response.data], { type: 'text/plain' })
+        blob: new Blob([response.data], { type: 'text/plain' }),
       });
       showNotification(t('logs.request_log_download_success'), 'success');
       setRequestLogId(null);
@@ -469,12 +545,94 @@ export function LogsPage() {
         >
           {t('logs.error_logs_modal_title')}
         </button>
+        <button
+          type="button"
+          className={`${styles.tabItem} ${activeTab === 'conversations' ? styles.tabActive : ''}`}
+          onClick={() => setActiveTab('conversations')}
+        >
+          {t('logs.conversation_tab')}
+        </button>
       </div>
 
       <div className={styles.content}>
+        {activeTab === 'conversations' && <ConversationLogsPanel />}
+
         {activeTab === 'logs' && (
           <Card className={styles.logCard}>
             {error && <div className="error-box">{error}</div>}
+
+            <div className={styles.storagePanel}>
+              <div className={styles.storageHeader}>
+                <div className={styles.storageHeading}>
+                  <div className={styles.storageTitle}>{t('logs.storage_title')}</div>
+                  <div className={styles.storagePath}>
+                    {logStorage?.['log-directory'] || t('logs.storage_path_unavailable')}
+                  </div>
+                </div>
+                <div className={styles.storageTotal}>
+                  {storageLoading
+                    ? t('common.loading')
+                    : t('logs.storage_total', {
+                        size: formatBytes(logStorage?.['total-size']),
+                        count: logStorage?.['total-files'] ?? 0,
+                      })}
+                </div>
+              </div>
+
+              <div className={styles.storageGrid}>
+                {STORAGE_TARGETS.map((target) => {
+                  const bucket = storageBuckets[target];
+                  return (
+                    <div key={target} className={styles.storageItem}>
+                      <div className={styles.storageItemMeta}>
+                        <span className={styles.storageItemLabel}>{logTargetLabels[target]}</span>
+                        <span className={styles.storageItemValue}>{formatBytes(bucket.size)}</span>
+                        <span className={styles.storageItemFiles}>
+                          {t('logs.storage_files', { count: bucket.files })}
+                        </span>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void clearLogData(target)}
+                        disabled={disableControls || bucket.files === 0}
+                        className={styles.storageClearButton}
+                      >
+                        <span className={styles.buttonContent}>
+                          <IconTrash2 size={15} />
+                          {t('logs.clear_storage_button')}
+                        </span>
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className={styles.storageFooter}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void loadLogStorage()}
+                  disabled={disableControls || storageLoading}
+                >
+                  <span className={styles.buttonContent}>
+                    <IconRefreshCw size={15} />
+                    {t('logs.refresh_storage_button')}
+                  </span>
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => void clearLogData('all')}
+                  disabled={disableControls || (logStorage?.['total-files'] ?? 0) === 0}
+                >
+                  <span className={styles.buttonContent}>
+                    <IconTrash2 size={15} />
+                    {t('logs.clear_all_storage_button')}
+                  </span>
+                </Button>
+              </div>
+            </div>
 
             <div className={styles.filters}>
               <div className={styles.searchWrapper}>
@@ -681,7 +839,7 @@ export function LogsPage() {
                 <Button
                   variant="danger"
                   size="sm"
-                  onClick={clearLogs}
+                  onClick={() => void clearLogData('application')}
                   disabled={disableControls}
                   className={styles.actionButton}
                 >
@@ -705,9 +863,7 @@ export function LogsPage() {
                   <div className={styles.loadMoreBanner}>
                     <span>{t('logs.load_more_hint')}</span>
                     <div className={styles.loadMoreStats}>
-                      <span>
-                        {t('logs.loaded_lines', { count: filteredLines.length })}
-                      </span>
+                      <span>{t('logs.loaded_lines', { count: filteredLines.length })}</span>
                       {removedCount > 0 && (
                         <span className={styles.loadMoreCount}>
                           {t('logs.filtered_lines', { count: removedCount })}
@@ -853,7 +1009,9 @@ export function LogsPage() {
 
               {requestLogEnabled && (
                 <div>
-                  <div className="status-badge warning">{t('logs.error_logs_request_log_enabled')}</div>
+                  <div className="status-badge warning">
+                    {t('logs.error_logs_request_log_enabled')}
+                  </div>
                 </div>
               )}
 
@@ -901,7 +1059,11 @@ export function LogsPage() {
         title={t('logs.request_log_download_title')}
         footer={
           <>
-            <Button variant="secondary" onClick={closeRequestLogModal} disabled={requestLogDownloading}>
+            <Button
+              variant="secondary"
+              onClick={closeRequestLogModal}
+              disabled={requestLogDownloading}
+            >
               {t('common.cancel')}
             </Button>
             <Button

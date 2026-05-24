@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
+import { useSplashTitleFit } from '@/hooks/useSplashTitleFit';
 import './SplashScreen.scss';
 
 interface SplashScreenProps {
@@ -12,6 +13,11 @@ const FADE_OUT_DURATION = 400;
 
 export function SplashScreen({ onFinish, fadeOut = false }: SplashScreenProps) {
   const { t } = useTranslation();
+  const splashContentRef = useRef<HTMLDivElement>(null);
+  const splashTitleRef = useRef<HTMLHeadingElement>(null);
+  const splashTitle = t('splash.title');
+
+  useSplashTitleFit(splashContentRef, splashTitleRef, splashTitle);
 
   useEffect(() => {
     if (!fadeOut) return;
@@ -26,9 +32,9 @@ export function SplashScreen({ onFinish, fadeOut = false }: SplashScreenProps) {
 
   return (
     <div className={`splash-screen ${fadeOut ? 'fade-out' : ''}`}>
-      <div className="splash-content">
-        <img src={INLINE_LOGO_JPEG} alt="PPAP" className="splash-logo" />
-        <h1 className="splash-title" aria-label={t('splash.title')}>
+      <div ref={splashContentRef} className="splash-content">
+        <img src={INLINE_LOGO_JPEG} alt="Playful Proxy API Panel" className="splash-logo" />
+        <h1 ref={splashTitleRef} className="splash-title" aria-label={splashTitle}>
           <span>{t('splash.title_line_1')}</span>
           <span>{t('splash.title_line_2')}</span>
         </h1>

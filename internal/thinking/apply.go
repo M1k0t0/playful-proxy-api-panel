@@ -338,6 +338,56 @@ func hasThinkingConfig(config ThinkingConfig) bool {
 	return config.Mode != ModeBudget || config.Budget != 0 || config.Level != ""
 }
 
+// ExtractReasoningEffort returns the request thinking setting as a canonical
+// reasoning_effort label for usage logging. Model suffixes follow ApplyThinking
+// priority and override body fields when they are valid for the target model.
+func ExtractReasoningEffort(body []byte, provider, model string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if effort := reasoningEffortFromSuffix(ParseSuffixForModel(model, provider)); effort != "" {
+		return effort
+	}
+
+	config := extractThinkingConfig(body, provider)
+	if !hasThinkingConfig(config) {
+		switch provider {
+		case "openai-response", "openai-responses":
+			config = extractCodexConfig(body)
+		case "openai":
+			config = extractCodexConfig(body)
+		}
+	}
+	return reasoningEffortFromConfig(config)
+}
+
+func reasoningEffortFromSuffix(suffix SuffixResult) string {
+	if !suffix.HasSuffix {
+		return ""
+	}
+	return reasoningEffortFromConfig(parseSuffixToConfig(suffix.RawSuffix, "", suffix.ModelName))
+}
+
+func reasoningEffortFromConfig(config ThinkingConfig) string {
+	if !hasThinkingConfig(config) {
+		return ""
+	}
+	switch config.Mode {
+	case ModeNone:
+		return string(LevelNone)
+	case ModeAuto:
+		return string(LevelAuto)
+	case ModeLevel:
+		return strings.ToLower(strings.TrimSpace(string(config.Level)))
+	case ModeBudget:
+		level, ok := ConvertBudgetToLevel(config.Budget)
+		if !ok {
+			return ""
+		}
+		return level
+	default:
+		return ""
+	}
+}
+
 // extractClaudeConfig extracts thinking configuration from Claude format request body.
 //
 // Claude API format:

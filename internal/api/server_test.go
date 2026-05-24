@@ -12,6 +12,7 @@ import (
 
 	gin "github.com/gin-gonic/gin"
 	proxyconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/conversationlog"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -246,5 +247,73 @@ func TestDefaultRequestLoggerFactory_UsesResolvedLogDirectory(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), "error-") && strings.HasSuffix(entry.Name(), ".log") {
 			t.Fatalf("unexpected forced error log in config dir %s", configLogsDir)
 		}
+	}
+}
+
+func TestConversationLogManagementRouteRequiresManagementKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("MANAGEMENT_PASSWORD", "mgmt-key")
+
+	tmpDir := t.TempDir()
+	authDir := filepath.Join(tmpDir, "auth")
+	conversationLogDir := filepath.Join(tmpDir, "conversation-logs")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatalf("failed to create auth dir: %v", err)
+	}
+
+	store := conversationlog.NewStore(conversationlog.Options{
+		Enabled:           true,
+		Directory:         conversationLogDir,
+		MaxFileSizeBytes:  1024 * 1024,
+		MaxTotalSizeBytes: 2 * 1024 * 1024,
+		MaxEntryBytes:     4096,
+	})
+	if _, err := store.Write(conversationlog.Entry{
+		ID:         "route-entry",
+		RequestID:  "req-route",
+		Method:     "POST",
+		Path:       "/v1/chat/completions",
+		Provider:   "codex",
+		Model:      "gpt-5.5",
+		StatusCode: 200,
+	}); err != nil {
+		t.Fatalf("failed to write conversation log fixture: %v", err)
+	}
+
+	cfg := &proxyconfig.Config{
+		SDKConfig: sdkconfig.SDKConfig{
+			APIKeys: []string{"test-key"},
+		},
+		Port:          0,
+		AuthDir:       authDir,
+		LoggingToFile: false,
+		ConversationLog: proxyconfig.ConversationLogConfig{
+			Enabled:        true,
+			Directory:      conversationLogDir,
+			MaxFileSizeMB:  1,
+			MaxTotalSizeMB: 2,
+			MaxEntryBytes:  4096,
+		},
+	}
+	server := NewServer(cfg, auth.NewManager(nil, nil, nil), sdkaccess.NewManager(), filepath.Join(tmpDir, "config.yaml"))
+
+	unauthorized := httptest.NewRecorder()
+	reqUnauthorized := httptest.NewRequest(http.MethodGet, "/v0/management/conversation-logs", nil)
+	reqUnauthorized.RemoteAddr = "127.0.0.1:12345"
+	server.engine.ServeHTTP(unauthorized, reqUnauthorized)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want %d; body=%s", unauthorized.Code, http.StatusUnauthorized, unauthorized.Body.String())
+	}
+
+	authorized := httptest.NewRecorder()
+	reqAuthorized := httptest.NewRequest(http.MethodGet, "/v0/management/conversation-logs", nil)
+	reqAuthorized.RemoteAddr = "127.0.0.1:12345"
+	reqAuthorized.Header.Set("X-Management-Key", "mgmt-key")
+	server.engine.ServeHTTP(authorized, reqAuthorized)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("authorized status = %d, want %d; body=%s", authorized.Code, http.StatusOK, authorized.Body.String())
+	}
+	if body := authorized.Body.String(); !strings.Contains(body, "route-entry") {
+		t.Fatalf("authorized response missing route entry: %s", body)
 	}
 }
