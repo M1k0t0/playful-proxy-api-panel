@@ -12,14 +12,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
-const latestReleaseUserAgent = "CLIProxyAPI-management-version-check"
+const (
+	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
+	latestReleaseUserAgent = "CLIProxyAPI"
+)
 
 func (h *Handler) GetConfig(c *gin.Context) {
 	if h == nil || h.cfg == nil {
@@ -38,17 +40,14 @@ type releaseInfo struct {
 func (h *Handler) GetLatestVersion(c *gin.Context) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	proxyURL := ""
-	panelRepo := ""
 	if h != nil && h.cfg != nil {
 		proxyURL = strings.TrimSpace(h.cfg.ProxyURL)
-		panelRepo = strings.TrimSpace(h.cfg.RemoteManagement.PanelGitHubRepository)
 	}
 	if proxyURL != "" {
 		sdkCfg := &sdkconfig.SDKConfig{ProxyURL: proxyURL}
 		util.SetProxy(sdkCfg, client)
 	}
 
-	latestReleaseURL := managementasset.ResolveReleaseURL(panelRepo)
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, latestReleaseURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request_create_failed", "message": err.Error()})

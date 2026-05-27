@@ -42,14 +42,9 @@ const MODEL_CATEGORY_ICONS: Record<string, string | { light: string; dark: strin
   minimax: iconMinimax,
 };
 
-const normalizeVersionText = (version?: string | null) => {
-  if (!version) return '';
-  const cleaned = version.trim().replace(/^["']+|["']+$/g, '').trim();
-  return cleaned;
-};
-
 const parseVersionSegments = (version?: string | null) => {
-  const cleaned = normalizeVersionText(version).replace(/^v/i, '');
+  if (!version) return null;
+  const cleaned = version.trim().replace(/^v/i, '');
   if (!cleaned) return null;
   const parts = cleaned
     .split(/[^0-9]+/)
@@ -111,8 +106,8 @@ export function SystemPage() {
   const requestLogDirty = requestLogDraft !== requestLogEnabled;
   const canEditRequestLog = auth.connectionStatus === 'connected' && Boolean(config);
 
-  const appVersion = normalizeVersionText(__APP_VERSION__) || t('system_info.version_unknown');
-  const apiVersion = normalizeVersionText(auth.serverVersion) || t('system_info.version_unknown');
+  const appVersion = __APP_VERSION__ || t('system_info.version_unknown');
+  const apiVersion = auth.serverVersion || t('system_info.version_unknown');
   const buildTime = auth.serverBuildDate
     ? new Date(auth.serverBuildDate).toLocaleString(i18n.language)
     : t('system_info.version_unknown');
@@ -291,10 +286,8 @@ export function SystemPage() {
     try {
       const data = await versionApi.checkLatest();
       const latestRaw = data?.['latest-version'] ?? data?.latest_version ?? data?.latest ?? '';
-      const latest = normalizeVersionText(
-        typeof latestRaw === 'string' ? latestRaw : String(latestRaw ?? '')
-      );
-      const comparison = compareVersions(latest, apiVersion);
+      const latest = typeof latestRaw === 'string' ? latestRaw : String(latestRaw ?? '');
+      const comparison = compareVersions(latest, auth.serverVersion);
 
       if (!latest) {
         showNotification(t('system_info.version_check_error'), 'error');
@@ -319,7 +312,7 @@ export function SystemPage() {
     } finally {
       setCheckingVersion(false);
     }
-  }, [apiVersion, showNotification, t]);
+  }, [auth.serverVersion, showNotification, t]);
 
   useEffect(() => {
     fetchConfig().catch(() => {

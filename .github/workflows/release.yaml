@@ -30,19 +30,17 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: web/management-panel/package-lock.json
+      - name: Build management panel
+        working-directory: web/management-panel
+        run: |
+          npm ci
+          npm run build
+          cp dist/index.html dist/management.html
       - name: Generate Build Metadata
         run: |
           echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
-      - name: Build management panel
-        working-directory: web/management-panel
-        env:
-          VERSION: ${{ env.VERSION }}
-        run: |
-          npm ci
-          npm run build
-          cp dist/index.html dist/management.html
       - uses: goreleaser/goreleaser-action@v4
         with:
           distribution: goreleaser
