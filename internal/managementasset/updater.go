@@ -300,6 +300,11 @@ func ensureFallbackManagementHTML(ctx context.Context, client *http.Client, loca
 	return true
 }
 
+// ResolveReleaseURL normalizes a GitHub repository setting to a release API URL.
+func ResolveReleaseURL(repo string) string {
+	return resolveReleaseURL(repo)
+}
+
 func resolveReleaseURL(repo string) string {
 	repo = strings.TrimSpace(repo)
 	if repo == "" {

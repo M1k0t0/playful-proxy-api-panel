@@ -1,5 +1,8 @@
 FROM node:24-alpine AS panel
 
+ARG VERSION=dev
+ENV VERSION=${VERSION}
+
 WORKDIR /panel
 
 COPY web/management-panel/package*.json ./
